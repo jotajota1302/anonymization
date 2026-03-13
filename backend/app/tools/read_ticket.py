@@ -1,0 +1,40 @@
+"""Tool: Read ticket from source system (Jira)."""
+
+from langchain_core.tools import tool
+
+
+@tool
+async def read_ticket(ticket_id: str) -> str:
+    """Lee el ticket completo del sistema origen (Jira) por su ID.
+    Usa esta herramienta para obtener los detalles del ticket incluyendo
+    descripcion, estado, prioridad y comentarios.
+
+    Args:
+        ticket_id: ID del ticket en el sistema origen (ej: PROJ-101)
+    """
+    from ..main import app_state
+
+    connector = app_state["jira_connector"]
+    anonymizer = app_state["anonymizer"]
+
+    try:
+        ticket = await connector.get_ticket(ticket_id)
+        comments = await connector.get_comments(ticket_id)
+
+        # Build full text for context
+        result = (
+            f"Ticket: {ticket['key']}\n"
+            f"Estado: {ticket['status']}\n"
+            f"Prioridad: {ticket['priority']}\n"
+            f"Resumen: {ticket['summary']}\n"
+            f"Descripcion: {ticket['description']}\n"
+        )
+
+        if comments:
+            result += "\nComentarios:\n"
+            for c in comments:
+                result += f"- [{c.get('author', 'unknown')}]: {c['body']}\n"
+
+        return result
+    except Exception as e:
+        return f"Error al leer ticket {ticket_id}: {str(e)}"

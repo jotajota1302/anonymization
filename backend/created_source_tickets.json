@@ -1,0 +1,26 @@
+[
+  {
+    "key": "PESESG-241",
+    "id": "15760919",
+    "summary": "Poliza hogar Elena Ruiz Fernandez rechazada por error en tarificacion",
+    "priority": "High"
+  },
+  {
+    "key": "PESESG-243",
+    "id": "15760921",
+    "summary": "Siniestro auto - Miguel Angel Torres reclama danos no cubiertos tras accidente A-6",
+    "priority": "Highest"
+  },
+  {
+    "key": "PESESG-245",
+    "id": "15760923",
+    "summary": "Error emision certificado seguro vida Carmen Navarro Lopez - urgente",
+    "priority": "High"
+  },
+  {
+    "key": "PESESG-247",
+    "id": "15760925",
+    "summary": "Alerta fraude poliza salud Pablo Jimenez Garcia - bloqueo recomendado",
+    "priority": "Highest"
+  }
+]
