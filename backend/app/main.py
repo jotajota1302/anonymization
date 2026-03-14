@@ -177,10 +177,11 @@ app.add_middleware(
 )
 
 # Include routers
-from .routers import tickets, chat  # noqa: E402
+from .routers import tickets, chat, admin  # noqa: E402
 
 app.include_router(tickets.router)
 app.include_router(chat.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

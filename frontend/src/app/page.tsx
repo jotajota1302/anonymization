@@ -216,9 +216,6 @@ export default function Home() {
     ? boardTickets.find((bt) => bt.key === selectedBoardKey) || null
     : null;
 
-  const pendingCount = boardTickets.filter((bt) => !bt.already_ingested).length;
-  const activeCount = tickets.filter((t) => t.status !== "closed").length;
-
   return (
     <div className="flex flex-col h-screen bg-[#F4F5F7]">
       {/* Top nav bar - Jira style */}
@@ -237,9 +234,12 @@ export default function Home() {
 
         {/* Center: Nav links */}
         <nav className="flex items-center gap-1 ml-8">
-          <span className="px-3 py-1.5 text-[13px] font-medium bg-white/10 rounded cursor-default">
+          <span className="px-3 py-1.5 text-[13px] font-medium bg-white/20 rounded cursor-default">
             Incidencias
           </span>
+          <a href="/admin" className="px-3 py-1.5 text-[13px] font-medium text-white/70 hover:bg-white/10 rounded transition-colors">
+            Admin
+          </a>
         </nav>
 
         {/* Right: User info + refresh */}
@@ -279,12 +279,23 @@ export default function Home() {
             Proyectos Especiales S...
           </span>
         </div>
-        <span className="text-[12px] text-[#6B778C]">
-          Board: {pendingCount} pendientes
-        </span>
-        <span className="text-[12px] text-[#6B778C]">
-          En atencion: {activeCount}
-        </span>
+        <div className="flex items-center gap-2 ml-2">
+          <span className="text-[11px] text-[#6B778C] uppercase tracking-wide">Origenes:</span>
+          {[...new Set(boardTickets.map((bt) => bt.source_system))].map((src) => (
+            <span key={src} className="px-2 py-0.5 text-[11px] font-medium bg-[#DEEBFF] text-[#0052CC] rounded-full">
+              {src}
+            </span>
+          ))}
+          {boardTickets.length === 0 && (
+            <span className="text-[11px] text-[#6B778C] italic">ninguno</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-[#6B778C] uppercase tracking-wide">Destino:</span>
+          <span className="px-2 py-0.5 text-[11px] font-medium bg-[#E3FCEF] text-[#006644] rounded-full">
+            KOSIN
+          </span>
+        </div>
       </div>
 
       {/* Main content */}

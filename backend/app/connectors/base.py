@@ -33,6 +33,11 @@ class TicketConnector(ABC):
         ...
 
     @abstractmethod
+    async def delete_ticket(self, ticket_id: str) -> bool:
+        """Delete a ticket by ID. Returns True on success."""
+        ...
+
+    @abstractmethod
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium",
         **kwargs

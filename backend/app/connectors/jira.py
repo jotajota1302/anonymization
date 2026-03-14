@@ -132,6 +132,13 @@ class MockJiraConnector(TicketConnector):
             return True
         return False
 
+    async def delete_ticket(self, ticket_id: str) -> bool:
+        if ticket_id in self.tickets:
+            del self.tickets[ticket_id]
+            self.comments.pop(ticket_id, None)
+            return True
+        return False
+
     async def download_attachment(self, attachment_url: str) -> bytes:
         return b""
 
@@ -243,6 +250,10 @@ class JiraConnector(TicketConnector):
             )
             resp.raise_for_status()
             return resp.content
+
+    async def delete_ticket(self, ticket_id: str) -> bool:
+        logger.warning("jira_delete_ticket: not implemented for real Jira")
+        return False
 
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium", **kwargs

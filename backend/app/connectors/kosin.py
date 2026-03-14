@@ -145,6 +145,21 @@ class KosinConnector(TicketConnector):
             logger.error("kosin_create_failed", error=str(e))
             return None
 
+    async def delete_ticket(self, ticket_id: str) -> bool:
+        """Delete a ticket from KOSIN via REST API."""
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.delete(
+                    f"{self._api_base}/issue/{ticket_id}",
+                    headers=self._headers,
+                )
+                resp.raise_for_status()
+                logger.info("kosin_ticket_deleted", key=ticket_id)
+                return True
+        except httpx.HTTPError as e:
+            logger.error("kosin_delete_failed", key=ticket_id, error=str(e))
+            return False
+
     async def update_status(self, ticket_id: str, status: str) -> bool:
         """Update ticket status via transitions."""
         transition_id = TRANSITIONS.get(status.lower())
@@ -239,6 +254,14 @@ class MockKosinConnector(TicketConnector):
         self.comments[key] = []
         logger.info("mock_kosin_ticket_created", key=key)
         return key
+
+    async def delete_ticket(self, ticket_id: str) -> bool:
+        if ticket_id in self.tickets:
+            del self.tickets[ticket_id]
+            self.comments.pop(ticket_id, None)
+            logger.info("mock_kosin_ticket_deleted", key=ticket_id)
+            return True
+        return False
 
     async def update_status(self, ticket_id: str, status: str) -> bool:
         if ticket_id in self.tickets:

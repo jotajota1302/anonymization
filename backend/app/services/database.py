@@ -138,6 +138,28 @@ class DatabaseService:
             (status, closed_at, ticket_id)
         )
 
+    async def get_all_ticket_mappings_with_kosin(self) -> List[dict]:
+        """Get all ticket mappings with KOSIN key info for admin view."""
+        return await self.fetchall(
+            "SELECT id, source_system, source_ticket_id, kosin_ticket_id, summary, status, priority, created_at FROM ticket_mapping ORDER BY created_at DESC"
+        )
+
+    async def get_ticket_by_kosin_key(self, kosin_key: str) -> Optional[dict]:
+        """Find a ticket mapping by its KOSIN ticket key."""
+        return await self.fetchone(
+            "SELECT * FROM ticket_mapping WHERE kosin_ticket_id = ?",
+            (kosin_key,)
+        )
+
+    async def delete_ticket_mapping(self, ticket_id: int):
+        """Delete a ticket mapping and all related data (cascade)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM chat_history WHERE ticket_mapping_id = ?", (ticket_id,))
+            await db.execute("DELETE FROM substitution_map WHERE ticket_mapping_id = ?", (ticket_id,))
+            await db.execute("DELETE FROM audit_log WHERE ticket_mapping_id = ?", (ticket_id,))
+            await db.execute("DELETE FROM ticket_mapping WHERE id = ?", (ticket_id,))
+            await db.commit()
+
     # --- Substitution Map ---
 
     async def save_substitution_map(self, ticket_mapping_id: int, encrypted_map: bytes):

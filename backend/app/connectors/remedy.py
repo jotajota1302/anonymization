@@ -125,6 +125,13 @@ class MockRemedyConnector(TicketConnector):
             return True
         return False
 
+    async def delete_ticket(self, ticket_id: str) -> bool:
+        if ticket_id in self.tickets:
+            del self.tickets[ticket_id]
+            self.comments.pop(ticket_id, None)
+            return True
+        return False
+
     async def download_attachment(self, attachment_url: str) -> bytes:
         return b""
 
