@@ -860,46 +860,50 @@ como funcionalidad del sistema. No hay mecanismo automatico de bloqueo ni deriva
 ```
 ticketing-anonymization/
 ├── .gitignore
+├── PROPUESTA_ARQUITECTURA_ANONIMIZACION_TICKETING.md
 ├── backend/
 │   ├── .env                             # Variables de entorno (no commiteado)
 │   ├── .env.example                     # Template con todas las variables
-│   ├── requirements.txt                 # Dependencias Python
+│   ├── requirements.txt                 # Dependencias Python (+ attachment + pytest)
 │   ├── seed.py                          # Poblar DB con tickets mock de seguros
-│   ├── create_source_tickets.py         # Crear tickets POC en KOSIN real
-│   ├── cleanup_tickets.py              # Limpiar tickets POC de KOSIN
+│   ├── create_source_tickets.py         # Crear ticket padre VOLCADO + tickets POC en KOSIN
+│   ├── cleanup_tickets.py              # Limpiar tickets POC + padre + DB + .env
 │   ├── data/
 │   │   └── ticketing.db                 # SQLite database
+│   ├── tests/                           # Tests pytest (35 tests)
+│   │   ├── __init__.py
+│   │   ├── test_anonymizer.py           # 17 tests: detect_pii, anonymize, de_anonymize, crypto
+│   │   ├── test_attachment_processor.py # 11 tests: routing, plaintext, mocks OCR/PDF/DOCX
+│   │   └── test_de_anonymize_roundtrip.py # 4 tests: anonymize→encrypt→decrypt→de_anonymize
 │   └── app/
 │       ├── __init__.py
-│       ├── main.py                      # FastAPI app, lifespan, CORS, routers, app_state
+│       ├── main.py                      # FastAPI app, lifespan, CORS, RateLimiter, routers
 │       ├── config.py                    # Pydantic Settings desde .env
 │       │
 │       ├── routers/                     # (propuesta: api/)
-│       │   ├── tickets.py               # REST: CRUD + ingest-confirm + board + kosin-comment
+│       │   ├── tickets.py               # REST: CRUD + ingest + board + sync-to-client + kosin-comment
 │       │   └── chat.py                  # WebSocket: streaming chat con agente
 │       │
 │       ├── services/
-│       │   ├── anonymizer.py            # RegexDetector + mapa sustitucion + AES-256-GCM + filtro
-│       │   │                            # (propuesta: separado en anonymizer + crypto + pii_filter)
-│       │   ├── agent.py                 # AnonymizationAgent (LangChain, tools, streaming, chips)
+│       │   ├── anonymizer.py            # Anonymizer: mapa sustitucion + AES-256-GCM + filtro + de_anonymize
+│       │   ├── detection.py             # DetectionService ABC + RegexDetector + AttachmentDetector
+│       │   ├── attachment_processor.py  # Extraccion texto: PDF, OCR, DOCX, XLSX, PPTX, plaintext
+│       │   ├── agent.py                 # AnonymizationAgent (LangChain, 5 tools, streaming, chips)
 │       │   └── database.py              # DatabaseService async (aiosqlite, schema, CRUD)
-│       │                                # (propuesta: models/database.py con SQLAlchemy)
 │       │
 │       ├── connectors/
-│       │   ├── base.py                  # Interfaz abstracta TicketConnector
+│       │   ├── base.py                  # Interfaz abstracta TicketConnector + download_attachment
 │       │   ├── jira.py                  # MockJiraConnector + JiraConnector (httpx)
-│       │   │                            # (propuesta: jira_connector.py con libreria jira)
 │       │   └── kosin.py                 # KosinConnector + MockKosinConnector (httpx)
-│       │                                # (propuesta: kosin_connector.py)
 │       │
-│       ├── tools/                       # (nuevo — propuesta: dentro del agente)
+│       ├── tools/                       # LangChain tools (5 implementadas)
 │       │   ├── read_ticket.py           # Tool: leer ticket origen completo
 │       │   ├── update_kosin.py          # Tool: comentar/actualizar KOSIN
-│       │   └── execute_action.py        # Tool: acciones tecnicas (simuladas)
+│       │   ├── execute_action.py        # Tool: acciones tecnicas (simuladas)
+│       │   └── read_attachment.py       # Tool: descargar, extraer texto y anonimizar adjuntos
 │       │
 │       ├── models/
-│       │   └── schemas.py               # Pydantic schemas (request/response)
-│       │                                # (propuesta: database.py + ticket.py + chat.py)
+│       │   └── schemas.py               # Pydantic schemas (+ SyncToClientRequest)
 │       │
 │       ├── middleware/
 │       │   └── rate_limiter.py          # Rate limiter (registrado en app)
@@ -916,16 +920,15 @@ ticketing-anonymization/
     └── src/
         ├── app/
         │   ├── layout.tsx               # Root layout (lang="es")
-        │   ├── page.tsx                 # SPA: pagina principal, toda la orquestacion
+        │   ├── page.tsx                 # SPA: orquestacion + sync-to-client + close ticket
         │   └── globals.css
         ├── components/
-        │   ├── ChatPanel.tsx            # Panel derecho: chat + chips + confirmacion ingesta
+        │   ├── ChatPanel.tsx            # Chat + chips + botones Sincronizar/Cerrar
         │   ├── ChatMessage.tsx          # Burbuja de mensaje + links KOSIN
         │   ├── TicketList.tsx           # Panel izquierdo: pendientes + en atencion
         │   └── TicketCard.tsx           # Tarjeta de ticket ingestado
         ├── hooks/
         │   └── useWebSocket.ts          # WS: conexion, reconnect, streaming, chips
-        │                                # (propuesta: + useTickets.ts — no implementado)
         ├── stores/
         │   └── appStore.ts              # Zustand: estado global (tickets, chat, streaming)
         ├── lib/
@@ -936,14 +939,18 @@ ticketing-anonymization/
 
 **Archivos no creados (previstos en propuesta v1.0):**
 - `api/auth.py` — autenticacion JWT
-- `services/orchestrator.py` — orquestador centralizado
-- `utils/crypto.py` — cifrado (integrado en anonymizer.py)
-- `utils/pii_filter.py` — filtro PII (integrado en anonymizer.py)
+- `services/orchestrator.py` — orquestador centralizado (logica en routers/tickets.py)
 - `config/clients/piloto.yaml` — configuracion por cliente
 - `frontend/src/hooks/useTickets.ts` — hook de tickets (logica en page.tsx)
 - `frontend/src/services/api.ts` — cliente REST (se usa fetch directo)
 - `Dockerfile` (backend y frontend)
 - `docker-compose.yml`
+
+**Archivos nuevos (no previstos en propuesta v1.0):**
+- `services/detection.py` — DetectionService ABC con RegexDetector y AttachmentDetector
+- `services/attachment_processor.py` — Extraccion de texto de adjuntos (PDF, OCR, Office)
+- `tools/read_attachment.py` — Tool LangChain para leer y anonimizar adjuntos
+- `tests/` — 35 tests pytest (anonymizer, attachments, roundtrip de-anonymize)
 
 ---
 
