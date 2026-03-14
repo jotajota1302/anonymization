@@ -47,6 +47,15 @@ class KosinConnector(TicketConnector):
             resp.raise_for_status()
             data = resp.json()
             fields = data.get("fields", {})
+            attachments = [
+                {
+                    "filename": a.get("filename", ""),
+                    "content": a.get("content", ""),
+                    "mimeType": a.get("mimeType", ""),
+                    "size": a.get("size", 0),
+                }
+                for a in fields.get("attachment", [])
+            ]
             return {
                 "key": data["key"],
                 "summary": fields.get("summary", ""),
@@ -54,7 +63,17 @@ class KosinConnector(TicketConnector):
                 "status": fields.get("status", {}).get("name", "Unknown"),
                 "priority": fields.get("priority", {}).get("name", "Medium"),
                 "created": fields.get("created", ""),
+                "attachments": attachments,
             }
+
+    async def download_attachment(self, attachment_url: str) -> bytes:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.get(
+                attachment_url,
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.content
 
     async def get_comments(self, ticket_id: str) -> List[Dict]:
         async with httpx.AsyncClient() as client:
@@ -226,6 +245,9 @@ class MockKosinConnector(TicketConnector):
             self.tickets[ticket_id]["status"] = status
             return True
         return False
+
+    async def download_attachment(self, attachment_url: str) -> bytes:
+        return b""
 
     async def add_comment(self, ticket_id: str, comment: str) -> bool:
         if ticket_id not in self.comments:

@@ -15,6 +15,7 @@ from ..websocket.manager import ConnectionManager
 from ..tools.read_ticket import read_ticket
 from ..tools.update_kosin import update_kosin, create_kosin_ticket
 from ..tools.execute_action import execute_action
+from ..tools.read_attachment import read_attachment
 
 logger = structlog.get_logger()
 
@@ -73,6 +74,9 @@ ticket en KOSIN. Los comentarios deben estar anonimizados.
 Solo datos anonimizados.
 - `execute_action(action, service, interval)`: Ejecuta acciones tecnicas controladas. \
 Acciones disponibles: get_logs, check_status, restart_service, check_connectivity.
+- `read_attachment(ticket_id, attachment_index)`: Lee y anonimiza el contenido de un adjunto \
+del ticket origen. Soporta PDF, imagenes (OCR), Word, Excel, PowerPoint y texto plano. \
+Usa attachment_index para seleccionar cual adjunto leer (0 = primero).
 
 No ejecutes herramientas salvo que el operador lo solicite o sea claramente necesario \
 para responder su pregunta. Informa siempre de lo que vas a hacer antes de hacerlo.
@@ -139,7 +143,7 @@ class AnonymizationAgent:
         logger.info("llm_initialized", provider=settings.llm_provider)
 
         # Tools
-        self.tools = [read_ticket, update_kosin, create_kosin_ticket, execute_action]
+        self.tools = [read_ticket, update_kosin, create_kosin_ticket, execute_action, read_attachment]
 
     @staticmethod
     def _create_llm():

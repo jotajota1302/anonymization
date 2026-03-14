@@ -6,8 +6,9 @@ import structlog
 
 from ..models.schemas import (
     TicketSummary, TicketDetail, BoardTicket, IngestConfirmResponse,
-    TicketStatusUpdate, ChatMessageSchema,
+    TicketStatusUpdate, ChatMessageSchema, SyncToClientRequest,
 )
+from ..services.anonymizer import Anonymizer
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -277,6 +278,52 @@ async def update_ticket_status(ticket_id: int, update: TicketStatusUpdate):
     )
 
     return {"message": f"Ticket {ticket_id} status updated to {update.status.value}"}
+
+
+@router.post("/{ticket_id}/sync-to-client")
+async def sync_to_client(ticket_id: int, body: SyncToClientRequest):
+    """De-anonymize a comment and publish it to the source ticket."""
+    state = _get_state()
+    db = state["db"]
+    jira = state["jira_connector"]
+    encryption_key = state["encryption_key"]
+
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if ticket["status"] == "closed":
+        raise HTTPException(
+            status_code=409,
+            detail="El ticket está cerrado y el mapa de sustitución fue destruido",
+        )
+
+    # Load and decrypt substitution map
+    encrypted = await db.get_substitution_map(ticket_id)
+    if not encrypted:
+        raise HTTPException(status_code=404, detail="No substitution map found")
+
+    sub_map = Anonymizer.decrypt_map(encrypted, encryption_key)
+
+    # De-anonymize the comment
+    real_comment = Anonymizer.de_anonymize(body.comment, sub_map)
+
+    # Publish to source ticket
+    source_ticket_id = ticket["source_ticket_id"]
+    success = await jira.add_comment(source_ticket_id, real_comment)
+
+    if not success:
+        raise HTTPException(status_code=502, detail="Error publicando comentario en origen")
+
+    await db.add_audit_log(
+        operator_id="operator",
+        action="sync_to_client",
+        ticket_mapping_id=ticket_id,
+        details=f"source={source_ticket_id}, comment_length={len(real_comment)}",
+    )
+
+    logger.info("sync_to_client", ticket_id=ticket_id, source=source_ticket_id)
+    return {"message": f"Comentario sincronizado con {source_ticket_id}", "success": True}
 
 
 @router.post("/{ticket_id}/kosin-comment")

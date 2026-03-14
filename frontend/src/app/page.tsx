@@ -167,6 +167,50 @@ export default function Home() {
     }
   }, [selectedTicketId, fetchTickets]);
 
+  const handleSyncToClient = useCallback(
+    async (comment: string) => {
+      if (!selectedTicketId) return;
+      try {
+        const res = await fetch(
+          `${API_URL}/api/tickets/${selectedTicketId}/sync-to-client`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ comment }),
+          }
+        );
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Error al sincronizar: ${err.detail || "Error desconocido"}`);
+        }
+      } catch (err) {
+        console.error("Failed to sync to client:", err);
+        alert("Error de red al sincronizar con origen");
+      }
+    },
+    [selectedTicketId]
+  );
+
+  const handleCloseTicket = useCallback(async () => {
+    if (!selectedTicketId) return;
+    if (
+      !confirm(
+        "¿Cerrar el ticket definitivamente? El mapa de sustitución será destruido permanentemente."
+      )
+    )
+      return;
+    try {
+      await fetch(`${API_URL}/api/tickets/${selectedTicketId}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "closed" }),
+      });
+      fetchTickets();
+    } catch (err) {
+      console.error("Failed to close ticket:", err);
+    }
+  }, [selectedTicketId, fetchTickets]);
+
   // Get the currently selected board ticket object
   const selectedBoardTicket = selectedBoardKey
     ? boardTickets.find((bt) => bt.key === selectedBoardKey) || null
@@ -264,6 +308,8 @@ export default function Home() {
             boardTicket={selectedBoardTicket}
             onSendMessage={handleSendMessage}
             onFinishTicket={handleFinishTicket}
+            onSyncToClient={handleSyncToClient}
+            onCloseTicket={handleCloseTicket}
             onConfirmIngest={handleConfirmIngest}
           />
         </div>

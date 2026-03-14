@@ -132,6 +132,9 @@ class MockJiraConnector(TicketConnector):
             return True
         return False
 
+    async def download_attachment(self, attachment_url: str) -> bytes:
+        return b""
+
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium", **kwargs
     ) -> Optional[str]:
@@ -175,6 +178,15 @@ class JiraConnector(TicketConnector):
             resp.raise_for_status()
             data = resp.json()
             fields = data.get("fields", {})
+            attachments = [
+                {
+                    "filename": a.get("filename", ""),
+                    "content": a.get("content", ""),
+                    "mimeType": a.get("mimeType", ""),
+                    "size": a.get("size", 0),
+                }
+                for a in fields.get("attachment", [])
+            ]
             return {
                 "key": data["key"],
                 "summary": fields.get("summary", ""),
@@ -184,6 +196,7 @@ class JiraConnector(TicketConnector):
                 "created": fields.get("created", ""),
                 "reporter": fields.get("reporter", {}).get("displayName", ""),
                 "assignee": fields.get("assignee", {}).get("displayName", ""),
+                "attachments": attachments,
             }
 
     async def get_comments(self, ticket_id: str) -> List[Dict]:
@@ -219,6 +232,17 @@ class JiraConnector(TicketConnector):
                 json={"body": comment},
             )
             return resp.is_success
+
+    async def download_attachment(self, attachment_url: str) -> bytes:
+        import httpx
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.get(
+                attachment_url,
+                headers=self._headers,
+                auth=self._auth,
+            )
+            resp.raise_for_status()
+            return resp.content
 
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium", **kwargs

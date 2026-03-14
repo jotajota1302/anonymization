@@ -10,6 +10,8 @@ interface Props {
   boardTicket: BoardTicket | null;
   onSendMessage: (message: string, isChip?: boolean) => void;
   onFinishTicket: () => void;
+  onSyncToClient: (comment: string) => void;
+  onCloseTicket: () => void;
   onConfirmIngest: (key: string) => void;
 }
 
@@ -18,9 +20,12 @@ export function ChatPanel({
   boardTicket,
   onSendMessage,
   onFinishTicket,
+  onSyncToClient,
+  onCloseTicket,
   onConfirmIngest,
 }: Props) {
   const [input, setInput] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { chatMessages, streamingContent, isStreaming, isIngesting, tickets, suggestedChips } =
@@ -302,13 +307,43 @@ export function ChatPanel({
           <div className="flex items-center justify-between px-3 py-2 bg-[#F4F5F7] border-t border-[#DFE1E6]">
             {/* Action buttons */}
             <div className="flex gap-2">
-              <button
-                onClick={onFinishTicket}
-                className="px-3 py-1.5 text-[12px] font-medium text-[#00875A] bg-[#E3FCEF] rounded
-                           hover:bg-[#ABF5D1] transition-colors"
-              >
-                Finalizar ticket
-              </button>
+              {ticket && ticket.status !== "resolved" && ticket.status !== "closed" && (
+                <>
+                  <button
+                    onClick={() => {
+                      const agentMsgs = messages.filter((m) => m.role === "agent");
+                      const lastAgent = agentMsgs[agentMsgs.length - 1];
+                      if (!lastAgent) return;
+                      const comment = lastAgent.content.replace(/\[CHIPS[:\s].*?\]/gs, "").trim();
+                      if (!comment) return;
+                      setIsSyncing(true);
+                      onSyncToClient(comment);
+                      setTimeout(() => setIsSyncing(false), 2000);
+                    }}
+                    disabled={isSyncing}
+                    className="px-3 py-1.5 text-[12px] font-medium text-[#0052CC] bg-[#DEEBFF] rounded
+                               hover:bg-[#B3D4FF] disabled:opacity-50 transition-colors"
+                  >
+                    {isSyncing ? "Sincronizando..." : "Sincronizar con origen"}
+                  </button>
+                  <button
+                    onClick={onFinishTicket}
+                    className="px-3 py-1.5 text-[12px] font-medium text-[#00875A] bg-[#E3FCEF] rounded
+                               hover:bg-[#ABF5D1] transition-colors"
+                  >
+                    Finalizar ticket
+                  </button>
+                </>
+              )}
+              {ticket && ticket.status === "resolved" && (
+                <button
+                  onClick={onCloseTicket}
+                  className="px-3 py-1.5 text-[12px] font-medium text-[#DE350B] bg-[#FFEBE6] rounded
+                             hover:bg-[#FFBDAD] transition-colors"
+                >
+                  Cerrar ticket
+                </button>
+              )}
             </div>
             {/* Send button */}
             <button

@@ -28,6 +28,11 @@ class TicketConnector(ABC):
         ...
 
     @abstractmethod
+    async def download_attachment(self, attachment_url: str) -> bytes:
+        """Download an attachment by its content URL. Returns raw bytes."""
+        ...
+
+    @abstractmethod
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium",
         **kwargs

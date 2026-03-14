@@ -11,6 +11,7 @@ from .services.anonymizer import Anonymizer
 from .websocket.manager import ConnectionManager
 from .connectors.jira import MockJiraConnector
 from .connectors.kosin import MockKosinConnector, KosinConnector
+from .middleware.rate_limiter import RateLimiterMiddleware
 
 structlog.configure(
     processors=[
@@ -101,6 +102,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Rate limiter
+app.add_middleware(RateLimiterMiddleware)
 
 # CORS
 app.add_middleware(

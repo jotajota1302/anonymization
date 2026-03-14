@@ -1,11 +1,10 @@
-"""PII detection and anonymization service with RegexDetector."""
+"""PII detection and anonymization service with pluggable DetectionService."""
 
-import re
 import json
 import base64
 import os
 from typing import List, Dict, Tuple, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import structlog
@@ -37,107 +36,17 @@ SPANISH_NAMES = {
 
 
 class Anonymizer:
-    """PII detection and anonymization using regex patterns."""
+    """PII detection and anonymization with pluggable DetectionService."""
 
-    # Regex patterns for PII detection
-    PATTERNS = {
-        "EMAIL": re.compile(r'[\w.\-+]+@[\w.\-]+\.\w{2,}', re.IGNORECASE),
-        "TELEFONO": re.compile(
-            r'(?:\+34|0034)?\s?[6-9]\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3}'
-        ),
-        "DNI": re.compile(r'\b[0-9XYZxyz]\d{7}[A-Za-z]\b'),
-        "IP": re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'),
-        "IBAN": re.compile(
-            r'\bES\d{2}[\s]?\d{4}[\s]?\d{4}[\s]?\d{2}[\s]?\d{10}\b',
-            re.IGNORECASE
-        ),
-    }
-
-    # Pattern for potential proper names (capitalized words)
-    NAME_PATTERN = re.compile(r'\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b')
+    def __init__(self, detector=None):
+        if detector is None:
+            from .detection import RegexDetector
+            detector = RegexDetector()
+        self._detector = detector
 
     def detect_pii(self, text: str) -> List[PiiEntity]:
-        """Detect PII entities in text using regex patterns."""
-        entities = []
-
-        # Detect regex-based PII
-        for entity_type, pattern in self.PATTERNS.items():
-            for match in pattern.finditer(text):
-                entities.append(PiiEntity(
-                    text=match.group(),
-                    entity_type=entity_type,
-                    start=match.start(),
-                    end=match.end(),
-                ))
-
-        # Detect potential names (heuristic: capitalized words matching name dictionary)
-        name_candidates = []
-        for match in self.NAME_PATTERN.finditer(text):
-            word = match.group()
-            if word.lower() in SPANISH_NAMES:
-                name_candidates.append(PiiEntity(
-                    text=word,
-                    entity_type="PERSONA",
-                    start=match.start(),
-                    end=match.end(),
-                ))
-
-        # Merge consecutive name parts (e.g., "Juan Garcia" -> single PERSONA)
-        entities.extend(self._merge_name_candidates(name_candidates, text))
-
-        # Sort by position and remove overlaps
-        entities.sort(key=lambda e: e.start)
-        entities = self._remove_overlaps(entities)
-
-        return entities
-
-    def _merge_name_candidates(
-        self, candidates: List[PiiEntity], text: str
-    ) -> List[PiiEntity]:
-        """Merge consecutive name candidates into full names."""
-        if not candidates:
-            return []
-
-        merged = []
-        i = 0
-        while i < len(candidates):
-            current = candidates[i]
-            full_name = current.text
-            end = current.end
-
-            # Look ahead for consecutive name parts separated by spaces
-            j = i + 1
-            while j < len(candidates):
-                between = text[end:candidates[j].start]
-                if between.strip() == "" and len(between) <= 2:
-                    full_name += between + candidates[j].text
-                    end = candidates[j].end
-                    j += 1
-                else:
-                    break
-
-            merged.append(PiiEntity(
-                text=full_name,
-                entity_type="PERSONA",
-                start=current.start,
-                end=end,
-            ))
-            i = j
-
-        return merged
-
-    def _remove_overlaps(self, entities: List[PiiEntity]) -> List[PiiEntity]:
-        """Remove overlapping entities, keeping the longer one."""
-        if not entities:
-            return []
-
-        result = [entities[0]]
-        for entity in entities[1:]:
-            if entity.start >= result[-1].end:
-                result.append(entity)
-            elif len(entity.text) > len(result[-1].text):
-                result[-1] = entity
-        return result
+        """Detect PII entities in text using the configured DetectionService."""
+        return self._detector.detect(text)
 
     def anonymize(self, text: str) -> Tuple[str, Dict[str, str]]:
         """
@@ -214,6 +123,14 @@ class Anonymizer:
                 logger.warning("unknown_pii_in_output", entity_type=entity.entity_type)
 
         return filtered
+
+    @staticmethod
+    def de_anonymize(text: str, substitution_map: Dict[str, str]) -> str:
+        """Reemplaza tokens de anonimización por sus valores reales originales."""
+        result = text
+        for token, real_value in substitution_map.items():
+            result = result.replace(token, real_value)
+        return result
 
     # --- Encryption for substitution map persistence ---
 

@@ -98,6 +98,10 @@ class TicketStatusUpdate(BaseModel):
     status: TicketStatus
 
 
+class SyncToClientRequest(BaseModel):
+    comment: str = Field(..., min_length=1)
+
+
 class BoardTicket(BaseModel):
     """A ticket from the KOSIN board - only safe metadata, no PII."""
     key: str
