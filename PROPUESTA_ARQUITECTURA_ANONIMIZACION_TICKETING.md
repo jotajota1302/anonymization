@@ -1,10 +1,10 @@
 # Propuesta de Arquitectura: Plataforma de Anonimizacion de Ticketing
 
-**Version:** 1.2
+**Version:** 1.3
 **Fecha original:** 13 de Marzo de 2026
 **Ultima actualizacion:** 14 de Marzo de 2026
 **Equipo:** NTT DATA EMEAL
-**Estado:** Piloto implementado con sync_to_client, adjuntos y tests — pendiente validacion (Fase 4)
+**Estado:** Piloto implementado con Presidio NLP, multi-cliente (Remedy/ServiceNow), redaccion de imagenes y 56 tests — pendiente validacion (Fase 4)
 
 ---
 
@@ -448,51 +448,85 @@ el filtro final bloquea fugas residuales.
 ### 4.2 Anonymizer (Simplificado para Piloto)
 
 Se ha implementado la interfaz abstracta `DetectionService` (ABC) con implementaciones
-intercambiables. `Anonymizer` acepta un detector inyectable (default: `RegexDetector`).
+intercambiables. `Anonymizer` acepta un detector inyectable. El detector por defecto es
+`CompositeDetector` que combina Presidio (NLP) + RegexDetector (patrones estructurados).
 
 ```
-┌─────────────────────────────────────────────┐
-│     DetectionService (ABC) — detection.py   │
-│       detect(text) → List[PiiEntity]        │
-├─────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌────────────────────┐   │
-│  │ RegexDetector │  │ AttachmentDetector │   │
-│  │ (default)     │  │ (delega a Regex)   │   │
-│  └──────────────┘  └────────────────────┘   │
-│                                             │
-│  Futuro:                                    │
-│  ┌──────────────┐  ┌────────────────────┐   │
-│  │ AXETDetector │  │ PresidioDetector   │   │
-│  └──────────────┘  └────────────────────┘   │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│        DetectionService (ABC) — detection.py         │
+│          detect(text) → List[PiiEntity]              │
+├──────────────────────────────────────────────────────┤
+│  ┌──────────────────┐  ┌────────────────────┐        │
+│  │ PresidioDetector  │  │ RegexDetector      │        │
+│  │ (spaCy NER es)    │  │ (patrones España)  │        │
+│  │ PERSONA, UBICACION│  │ EMAIL, DNI, IBAN   │        │
+│  │ ORGANIZACION      │  │ IP, IPV6, TELEFONO │        │
+│  └────────┬─────────┘  │ DIRECCION, CP      │        │
+│           │             │ MATRICULA          │        │
+│           │             └────────┬───────────┘        │
+│           └──────────┬───────────┘                    │
+│                      ▼                                │
+│           ┌────────────────────┐                      │
+│           │ CompositeDetector  │ (default)             │
+│           │ Merge + dedup      │                      │
+│           │ Prefiere entidad   │                      │
+│           │ mas larga en       │                      │
+│           │ overlaps           │                      │
+│           └────────────────────┘                      │
+│                                                      │
+│  ┌────────────────────┐  ┌────────────────────┐      │
+│  │ AttachmentDetector │  │ AXETDetector       │      │
+│  │ (delega a Regex)   │  │ (futuro)           │      │
+│  └────────────────────┘  └────────────────────┘      │
+└──────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────┐
-│   Anonymizer (anonymizer.py)                │
-│                                             │
-│  __init__(detector=RegexDetector())         │
-│  detect_pii(text) → delega a detector       │
-│  anonymize(text) → (anon_text, map)         │
-│  filter_output(text, sub_map) → clean_text  │
-│  de_anonymize(text, sub_map) → real_text    │
-│                                             │
-│  Metodos estaticos de cifrado:              │
-│  generate_key() / encrypt_map / decrypt_map │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│   Anonymizer (anonymizer.py)                         │
+│                                                      │
+│  __init__(detector=CompositeDetector())              │
+│  detect_pii(text) → delega a detector                │
+│  anonymize(text) → (anon_text, map)                  │
+│  filter_output(text, sub_map) → clean_text           │
+│  de_anonymize(text, sub_map) → real_text             │
+│                                                      │
+│  Metodos estaticos de cifrado:                       │
+│  generate_key() / encrypt_map / decrypt_map          │
+└──────────────────────────────────────────────────────┘
 ```
 
-**Piloto - RegexDetector (implementado):**
-- Emails
-- Telefonos (+34, moviles, fijos)
-- DNI/NIE/NIF espanoles
-- IPs (solo v4)
-- IBANs
+**Configuracion via .env:** `PII_DETECTOR=composite` (default), `regex`, o `presidio`.
+Si Presidio no esta instalado, `CompositeDetector` hace fallback automatico a `RegexDetector`.
+
+**RegexDetector — Patrones (todos implementados):**
+- Emails, Telefonos (+34, moviles, fijos), DNI/NIE/NIF
+- IPs v4, **IPv6** (full y abreviadas con `::`)
+- IBANs espanoles
+- **Direcciones** (Calle, Avenida, Plaza, Paseo, etc. + numero)
+- **Codigos postales** (01-52 + 3 digitos)
+- **Matriculas** espanolas (formato actual 1234-BCD)
 - Nombres propios (diccionario de ~60 nombres y apellidos espanoles)
 
-**No implementado en piloto (previsto en propuesta v1.0):**
-- IPv6
-- Direcciones y codigos postales (`UBICACION`)
-- Deteccion de sistemas/servidores (`SISTEMA`)
-- NER/ML avanzado para nombres
+**PresidioDetector — NLP (implementado):**
+- Microsoft Presidio (open source, MIT) con spaCy `es_core_news_lg`
+- Detecta entidades que regex no puede: nombres no conocidos, organizaciones, ubicaciones
+- `score_threshold=0.4` (mejor sobre-detectar que perder PII en contexto GDPR)
+- Mapeo de tipos: `PERSON→PERSONA`, `LOCATION→UBICACION`, `ORGANIZATION→ORGANIZACION`
+
+**Instalacion Presidio:**
+```bash
+pip install presidio-analyzer presidio-image-redactor
+python -m spacy download es_core_news_lg
+```
+
+**Presidio Image Redactor — Redaccion PII en imagenes (implementado):**
+
+El `AttachmentProcessor` integra `presidio-image-redactor` para tres capacidades:
+- `redact_image(content)` → devuelve imagen PNG con PII tapada en negro
+- `analyze_image(content)` → devuelve entidades PII con bounding boxes (posicion, tipo, score)
+- Endpoint REST: `GET /api/tickets/{id}/attachment/{index}/redacted` → imagen redactada
+
+Usa el motor NLP español (spaCy `es_core_news_lg`) + OCR Tesseract (`spa+eng`).
+Engines lazy-initialized (solo se cargan si se procesan imagenes).
 
 **Mejora no prevista:** El filtro post-LLM detecta PII nuevo (no presente en el mapa original)
 y lo reemplaza con `[TYPE_REDACTED]`, proporcionando una capa adicional de seguridad.
@@ -553,10 +587,29 @@ class TicketConnector(ABC):
 - `JiraConnector`: Conector real para Jira externo via httpx (Basic Auth email+token).
   `update_status` y `create_ticket` no implementados (solo lectura).
 - `MockJiraConnector`: 5 tickets hardcodeados con PII de seguros (contexto espanol).
+- `MockRemedyConnector`: 4 tickets ITSM (INC, CHG, PRB) con PII realista de seguros.
+- `MockServiceNowConnector`: 3 tickets ServiceNow (SNOW-) con PII realista.
+- `MCPConnector` (base): Abstraccion forward-looking para futuros conectores MCP.
 
-**Modo POC:** En el piloto, `jira_connector = kosin_connector` — la misma instancia KOSIN
-sirve como origen y destino. Los tickets se distinguen por el prefijo `[ANON]` y el tipo
-de issue (Sub-Requirement vs otros tipos).
+**ConnectorRouter — Multi-cliente (implementado):**
+
+El `ConnectorRouter` permite registrar multiples sistemas fuente simultaneamente,
+cada uno con sus prefijos de ticket:
+- KOSIN: `PESESG-`, `PROJ-`
+- Remedy: `INC`, `CHG`, `PRB`
+- ServiceNow: `SNOW-`
+
+Configuracion via `.env`: `ACTIVE_SOURCES=kosin,remedy,servicenow`
+
+El router resuelve automaticamente que conector usar por prefijo del ticket ID.
+El board agrega tickets de todos los sistemas registrados, y cada ticket incluye
+un campo `source_system` que el frontend renderiza como badge de color
+(KOSIN azul, Remedy naranja, ServiceNow celeste).
+
+KOSIN sigue siendo el **unico destino** para copias anonimizadas [ANON].
+
+**Modo POC:** En el piloto con `USE_MOCK_JIRA=true`, todos los conectores son mocks.
+Con `USE_MOCK_JIRA=false`, KOSIN es real y Remedy/ServiceNow siguen siendo mocks.
 
 ### 4.5 Control de Acciones Tecnicas
 
@@ -640,7 +693,8 @@ CREATE TABLE audit_log (
 | Backend | Python 3.11+ / FastAPI | Async nativo, ideal para streaming LLM, tipado |
 | Base de datos | SQLite (aiosqlite) | Sin infraestructura adicional, suficiente para piloto |
 | Agente IA | LangChain + **Ollama (dev) / AzureChatOpenAI (prod)** | Cambio vs propuesta: soporte dual para desarrollo local sin Azure |
-| Deteccion PII | DetectionService ABC + RegexDetector | Red de seguridad determinista. Interfaz abstracta con inyeccion |
+| Deteccion PII | **CompositeDetector** (Presidio NLP + RegexDetector) | NER español + regex estructurado. Configurable via `PII_DETECTOR` |
+| Redaccion imagenes | **Presidio Image Redactor** + Tesseract OCR | PII detectada y tapada directamente en imagenes adjuntas |
 | Conectores | **httpx** (REST directo) | Cambio vs propuesta: no se usa libreria `jira` de Atlassian |
 | Comunicacion | REST (fetch) + WebSocket (nativo) | WebSocket para streaming de tokens del agente |
 | Logging | structlog | Logging estructurado (no previsto en propuesta) |
@@ -653,11 +707,11 @@ CREATE TABLE audit_log (
 | Base de datos | SQLite | PostgreSQL |
 | Autenticacion | Sin auth (operator_id hardcoded) | SSO/OAuth2 corporativo |
 | Adjuntos | ✅ OCR + PDF + Office (AttachmentProcessor) | Tesseract en servidor, validacion formatos |
-| Conectores | 1 KOSIN (source+dest) | Multi-sistema (Jira externo, Remedy, ServiceNow) |
+| Conectores | ✅ **ConnectorRouter** multi-source (KOSIN + Remedy + ServiceNow mocks) | Conectores reales para Remedy/ServiceNow + MCP |
 | Despliegue | Manual (uvicorn + npm) | Docker Compose → Kubernetes / Azure Container Apps |
 | Escalado | Monolito | Microservicios si volumen lo requiere |
 | Cache | Ninguna | Redis para sesiones y cache LLM |
-| Deteccion PII | ✅ DetectionService ABC + RegexDetector | + AXET/Presidio como implementaciones |
+| Deteccion PII | ✅ **CompositeDetector** (Presidio + Regex) | + AXET como implementacion adicional |
 | Volcado inverso | ✅ sync_to_client (de_anonymize + endpoint) | Confirmacion supervisor onshore |
 
 ---
@@ -699,7 +753,7 @@ CREATE TABLE audit_log (
 | LLM filtra PII en respuesta | Baja | Triple barrera: pre-LLM + prompt + post-LLM | ✅ |
 | Operador deduce datos por contexto | Baja | Tokens consistentes por ticket | ✅ |
 | Mapa de sustitucion comprometido | Muy baja | Cifrado AES-256-GCM en reposo | ✅ |
-| Adjuntos con PII visible | Media | AttachmentProcessor + read_attachment tool (OCR, PDF, Office) | ✅ |
+| Adjuntos con PII visible | Media | AttachmentProcessor + read_attachment + Presidio Image Redactor | ✅ |
 | Accion tecnica no segura | Media | Allowlist + auditoria. Acciones simuladas en piloto | ✅ (simulado) |
 | Caso ambiguo no anonimizable | Media | Escalado a onshore | ⚠️ No implementado |
 | read_ticket devuelve PII al LLM | Baja | System prompt + post-filter. Pre-filter no aplicado en este path | ⚠️ Riesgo aceptado |
@@ -831,7 +885,7 @@ como funcionalidad del sistema. No hay mecanismo automatico de bloqueo ni deriva
 - ✅ Tool read_attachment (PDF, OCR, Office) con AttachmentProcessor
 - ✅ DetectionService ABC con RegexDetector + AttachmentDetector
 - ✅ Rate limiter registrado en app
-- ✅ Tests pytest (35 tests: anonymizer, attachments, roundtrip)
+- ✅ Tests pytest (56 tests: anonymizer, Presidio, Composite, attachments, image redaction, roundtrip)
 
 **Fase 4 - Validacion (Semana 4)** ⏳ Pendiente
 - Testing con tickets representativos
@@ -870,10 +924,10 @@ ticketing-anonymization/
 │   ├── cleanup_tickets.py              # Limpiar tickets POC + padre + DB + .env
 │   ├── data/
 │   │   └── ticketing.db                 # SQLite database
-│   ├── tests/                           # Tests pytest (35 tests)
+│   ├── tests/                           # Tests pytest (56 tests)
 │   │   ├── __init__.py
-│   │   ├── test_anonymizer.py           # 17 tests: detect_pii, anonymize, de_anonymize, crypto
-│   │   ├── test_attachment_processor.py # 11 tests: routing, plaintext, mocks OCR/PDF/DOCX
+│   │   ├── test_anonymizer.py           # 31 tests: detect_pii, Presidio NLP, Composite dedup, nuevos regex, crypto
+│   │   ├── test_attachment_processor.py # 15 tests: routing, plaintext, mocks OCR/PDF/DOCX, image redaction
 │   │   └── test_de_anonymize_roundtrip.py # 4 tests: anonymize→encrypt→decrypt→de_anonymize
 │   └── app/
 │       ├── __init__.py
@@ -894,7 +948,11 @@ ticketing-anonymization/
 │       ├── connectors/
 │       │   ├── base.py                  # Interfaz abstracta TicketConnector + download_attachment
 │       │   ├── jira.py                  # MockJiraConnector + JiraConnector (httpx)
-│       │   └── kosin.py                 # KosinConnector + MockKosinConnector (httpx)
+│       │   ├── kosin.py                 # KosinConnector + MockKosinConnector (httpx)
+│       │   ├── router.py               # ConnectorRouter multi-source (resolucion por prefijo)
+│       │   ├── mcp.py                   # MCPConnector base (forward-looking)
+│       │   ├── remedy.py               # MockRemedyConnector (4 tickets ITSM)
+│       │   └── servicenow.py           # MockServiceNowConnector (3 tickets)
 │       │
 │       ├── tools/                       # LangChain tools (5 implementadas)
 │       │   ├── read_ticket.py           # Tool: leer ticket origen completo
@@ -999,23 +1057,24 @@ funcionalidad innecesaria de los proyectos origen.
 
 ### 11.1 MCP (Model Context Protocol)
 
-Se evaluo el uso de MCP pero **no se implemento**. Los conectores se comunican directamente
-con las APIs REST de Jira/KOSIN via httpx. MCP puede reconsiderarse si se necesitan mas
-integraciones o si el ecosistema de herramientas crece significativamente.
+Se ha creado la clase base `MCPConnector` (hereda de `TicketConnector`) como abstraccion
+forward-looking. Actualmente los mocks (Remedy, ServiceNow) heredan directamente de
+`TicketConnector`, pero cuando haya servidores MCP reales, heredaran de `MCPConnector`
+y usaran `call_tool()` para comunicarse via Model Context Protocol.
 
 ### 11.2 Evolucion Post-Piloto
 
 Prioridades inmediatas (deuda tecnica del piloto):
 - **Autenticacion:** JWT basico o SSO para identificar operadores reales
 - **Docker:** Crear Dockerfile + docker-compose.yml para despliegue reproducible
-- **IPv6 y ubicaciones:** Ampliar regex del RegexDetector
+- ~~**IPv6 y ubicaciones:** Ampliar regex del RegexDetector~~ ✅ Implementado (IPv6, direcciones, CP, matriculas + Presidio NLP)
 
 Mejoras funcionales:
-- **Multi-cliente:** Conectores para Jira externo real, Remedy, ServiceNow
+- ~~**Multi-cliente:** Conectores para Jira externo real, Remedy, ServiceNow~~ ✅ ConnectorRouter + mocks Remedy/ServiceNow + MCPConnector base
 - **Escalado:** Migracion a PostgreSQL, Redis, y despliegue en Kubernetes
 - **Analytics:** Dashboard de metricas (tickets procesados, tiempo resolucion, etc.)
 - **Multi-idioma:** Soporte para deteccion de PII en multiples idiomas europeos
-- **Deteccion avanzada:** Nuevas implementaciones DetectionService (AXET/Presidio)
+- ~~**Deteccion avanzada:** Nuevas implementaciones DetectionService (AXET/Presidio)~~ ✅ PresidioDetector + CompositeDetector + Image Redactor
 - **Escalado onshore:** Mecanismo automatico de bloqueo y derivacion
 
 ### 11.3 Dependencias Externas
@@ -1048,12 +1107,16 @@ KOSIN como repositorio interno anonimizado, y un catalogo cerrado de acciones te
 - Chips de accion sugerida (UX significativamente mejorada)
 - Soporte dual LLM (Ollama + Azure) para desarrollo agil
 - Filtro post-LLM mejorado con deteccion de PII desconocido (`[TYPE_REDACTED]`)
+- **Presidio NLP** (v1.3): deteccion de nombres, organizaciones y ubicaciones no capturables por regex
+- **Presidio Image Redactor** (v1.3): redaccion de PII directamente en imagenes adjuntas
+- **Multi-cliente** (v1.3): ConnectorRouter con Remedy y ServiceNow (mocks), MCPConnector base
+- **56 tests** (v1.3): cobertura completa de deteccion, anonimizacion, redaccion de imagenes y conectores
 
 **Principales elementos pendientes:**
 - Autenticacion de operadores (JWT/SSO)
 - Docker Compose y Dockerfiles
 - Escalado automatico a onshore
-- Deteccion de IPv6, direcciones y ubicaciones
+- Conectores reales Remedy/ServiceNow (actualmente mocks funcionales)
 
 El principio fundamental se mantiene: **el operador nunca ve datos reales; la plataforma,
 no solo el agente, actua como barrera de acceso a PII**.

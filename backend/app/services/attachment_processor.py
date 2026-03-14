@@ -1,15 +1,57 @@
-"""Attachment text extraction service supporting PDF, images (OCR), and Office formats."""
+"""Attachment text extraction service supporting PDF, images (OCR), and Office formats.
+
+Supports optional Presidio Image Redactor for PII detection/redaction directly on images.
+"""
 
 import io
-from typing import Tuple
+from typing import Tuple, Optional
 
 import structlog
 
 logger = structlog.get_logger()
 
+# Lazy-initialized Presidio image engines (expensive to create)
+_image_redactor_engine = None
+_image_analyzer_engine = None
+
+
+def _get_presidio_image_engines():
+    """Lazy-init Presidio image engines with Spanish NLP support."""
+    global _image_redactor_engine, _image_analyzer_engine
+
+    if _image_redactor_engine is not None:
+        return _image_redactor_engine, _image_analyzer_engine
+
+    try:
+        from presidio_image_redactor import ImageRedactorEngine, ImageAnalyzerEngine
+        from presidio_analyzer import AnalyzerEngine
+        from presidio_analyzer.nlp_engine import SpacyNlpEngine
+
+        # Use Spanish spaCy model for NER in images
+        nlp_engine = SpacyNlpEngine(
+            models=[{"lang_code": "es", "model_name": "es_core_news_lg"}],
+        )
+        analyzer = AnalyzerEngine(
+            nlp_engine=nlp_engine,
+            supported_languages=["es"],
+        )
+        _image_analyzer_engine = ImageAnalyzerEngine(analyzer_engine=analyzer)
+        _image_redactor_engine = ImageRedactorEngine(
+            image_analyzer_engine=_image_analyzer_engine,
+        )
+        logger.info("presidio_image_engines_initialized")
+        return _image_redactor_engine, _image_analyzer_engine
+    except (ImportError, OSError) as e:
+        logger.warning("presidio_image_not_available", error=str(e))
+        return None, None
+
 
 class AttachmentProcessor:
-    """Extracts text from attachment files by routing on file extension."""
+    """Extracts text from attachment files by routing on file extension.
+
+    When presidio-image-redactor is installed, images can also be redacted
+    (PII regions blacked out) and analyzed (PII entities with bounding boxes).
+    """
 
     def extract_text(self, content: bytes, filename: str) -> Tuple[str, str]:
         """Extract text from attachment content.
@@ -35,6 +77,76 @@ class AttachmentProcessor:
             return self._extract_pptx(content), "pptx"
         else:
             return self._extract_plaintext(content), "plaintext"
+
+    def redact_image(self, content: bytes, fill_color: Tuple[int, int, int] = (0, 0, 0)) -> Optional[bytes]:
+        """Redact PII from an image using Presidio Image Redactor.
+
+        Args:
+            content: Raw image bytes (JPEG, PNG, etc.)
+            fill_color: RGB color to fill redacted regions (default: black)
+
+        Returns:
+            Redacted image as PNG bytes, or None if Presidio is not available.
+        """
+        redactor, _ = _get_presidio_image_engines()
+        if redactor is None:
+            return None
+
+        try:
+            from PIL import Image
+            image = Image.open(io.BytesIO(content))
+            redacted = redactor.redact(
+                image,
+                fill=fill_color,
+                ocr_kwargs={"lang": "spa+eng"},
+                language="es",
+            )
+            buf = io.BytesIO()
+            redacted.save(buf, format="PNG")
+            logger.info("image_redacted_successfully")
+            return buf.getvalue()
+        except Exception as e:
+            logger.error("image_redaction_failed", error=str(e))
+            return None
+
+    def analyze_image(self, content: bytes) -> list:
+        """Analyze an image for PII entities using Presidio Image Analyzer.
+
+        Args:
+            content: Raw image bytes.
+
+        Returns:
+            List of detected PII entities with bounding boxes,
+            or empty list if Presidio is not available.
+        """
+        _, analyzer = _get_presidio_image_engines()
+        if analyzer is None:
+            return []
+
+        try:
+            from PIL import Image
+            image = Image.open(io.BytesIO(content))
+            results = analyzer.analyze(
+                image,
+                ocr_kwargs={"lang": "spa+eng"},
+                language="es",
+            )
+            entities = []
+            for r in results:
+                entities.append({
+                    "entity_type": r.entity_type,
+                    "text": r.text if hasattr(r, "text") else "",
+                    "score": r.score,
+                    "left": r.left,
+                    "top": r.top,
+                    "width": r.width,
+                    "height": r.height,
+                })
+            logger.info("image_analyzed", entities_found=len(entities))
+            return entities
+        except Exception as e:
+            logger.error("image_analysis_failed", error=str(e))
+            return []
 
     def _extract_image(self, content: bytes) -> str:
         try:

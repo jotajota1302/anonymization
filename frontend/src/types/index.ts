@@ -33,4 +33,5 @@ export interface BoardTicket {
   status: string;
   issue_type: string;
   already_ingested: boolean;
+  source_system: string;
 }

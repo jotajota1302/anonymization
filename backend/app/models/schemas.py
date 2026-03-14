@@ -109,6 +109,7 @@ class BoardTicket(BaseModel):
     status: str
     issue_type: str
     already_ingested: bool = False
+    source_system: str = "kosin"
 
 
 class IngestConfirmResponse(BaseModel):

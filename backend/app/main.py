@@ -11,6 +11,7 @@ from .services.anonymizer import Anonymizer
 from .websocket.manager import ConnectionManager
 from .connectors.jira import MockJiraConnector
 from .connectors.kosin import MockKosinConnector, KosinConnector
+from .connectors.router import ConnectorRouter
 from .middleware.rate_limiter import RateLimiterMiddleware
 
 structlog.configure(
@@ -27,6 +28,37 @@ logger = structlog.get_logger()
 app_state: dict = {}
 
 
+def _init_detector():
+    """Initialize the PII detector based on config."""
+    detector_type = settings.pii_detector.lower()
+
+    if detector_type == "regex":
+        from .services.detection import RegexDetector
+        logger.info("pii_detector_initialized", type="regex")
+        return RegexDetector()
+
+    if detector_type == "presidio":
+        try:
+            from .services.detection import PresidioDetector
+            logger.info("pii_detector_initialized", type="presidio")
+            return PresidioDetector()
+        except Exception as e:
+            logger.warning("presidio_not_available", error=str(e), fallback="regex")
+            from .services.detection import RegexDetector
+            return RegexDetector()
+
+    # Default: composite
+    try:
+        from .services.detection import CompositeDetector
+        detector = CompositeDetector()
+        logger.info("pii_detector_initialized", type="composite")
+        return detector
+    except Exception as e:
+        logger.warning("composite_detector_failed", error=str(e), fallback="regex")
+        from .services.detection import RegexDetector
+        return RegexDetector()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize services on startup, cleanup on shutdown."""
@@ -37,8 +69,12 @@ async def lifespan(app: FastAPI):
     await db.init()
     app_state["db"] = db
 
+    # PII Detector
+    detector = _init_detector()
+    app_state["detector"] = detector
+
     # Anonymizer
-    anonymizer = Anonymizer()
+    anonymizer = Anonymizer(detector=detector)
     app_state["anonymizer"] = anonymizer
 
     # Encryption key
@@ -49,28 +85,53 @@ async def lifespan(app: FastAPI):
     ws_manager = ConnectionManager()
     app_state["ws_manager"] = ws_manager
 
-    # Connectors
-    # POC: same JIRA instance as source AND destination
+    # Connectors + Router
+    router = ConnectorRouter()
+    active_sources = [s.strip().lower() for s in settings.active_sources.split(",") if s.strip()]
+
     if settings.use_mock_jira:
-        jira_connector = MockJiraConnector()
+        # Mock mode: register mock connectors for each active source
+        if "kosin" in active_sources:
+            kosin_source = MockJiraConnector()
+            router.register("kosin", kosin_source, ["PESESG-", "PROJ-"])
+
+        if "remedy" in active_sources:
+            from .connectors.remedy import MockRemedyConnector
+            router.register("remedy", MockRemedyConnector(), ["INC", "CHG", "PRB"])
+
+        if "servicenow" in active_sources:
+            from .connectors.servicenow import MockServiceNowConnector
+            router.register("servicenow", MockServiceNowConnector(), ["SNOW-"])
+
         kosin_connector = MockKosinConnector()
-        logger.info("connectors_mode", mode="mock")
+        logger.info("connectors_mode", mode="mock", sources=active_sources)
     else:
-        # Both connectors point to the same KOSIN Jira instance
-        # Source: reads existing tickets from PESESG
-        # Destination: creates anonymized copies in PESESG
+        # Real mode: KOSIN as source + destination
         kosin_connector = KosinConnector(
             base_url=settings.kosin_url,
             token=settings.kosin_token,
             project=settings.kosin_project,
             issue_type_id=settings.kosin_issue_type_id,
         )
-        # For POC, jira_connector IS the same kosin instance (read source tickets)
-        jira_connector = kosin_connector
-        logger.info("connectors_mode", mode="real_kosin", url=settings.kosin_url, project=settings.kosin_project)
+        if "kosin" in active_sources:
+            router.register("kosin", kosin_connector, ["PESESG-", "PROJ-"])
 
-    app_state["jira_connector"] = jira_connector
+        if "remedy" in active_sources:
+            from .connectors.remedy import MockRemedyConnector
+            router.register("remedy", MockRemedyConnector(), ["INC", "CHG", "PRB"])
+
+        if "servicenow" in active_sources:
+            from .connectors.servicenow import MockServiceNowConnector
+            router.register("servicenow", MockServiceNowConnector(), ["SNOW-"])
+
+        logger.info("connectors_mode", mode="real_kosin", url=settings.kosin_url,
+                     project=settings.kosin_project, sources=active_sources)
+
+    app_state["connector_router"] = router
     app_state["kosin_connector"] = kosin_connector
+    # Backward compat: jira_connector points to the first registered source
+    first_source = active_sources[0] if active_sources else "kosin"
+    app_state["jira_connector"] = router.get_connector_by_name(first_source) or kosin_connector
 
     # Agent (lazy init - requires LLM config)
     try:

@@ -92,3 +92,82 @@ class TestDocx:
         text, fmt = processor.extract_text(b"docx-bytes", "file.docx")
         assert fmt == "docx"
         assert text == "Contenido Word"
+
+
+class TestPresidioImageRedaction:
+    """Tests for Presidio image redaction and analysis capabilities."""
+
+    def test_redact_image_returns_none_without_presidio(self, processor):
+        """When Presidio image engines fail to init, redact_image returns None."""
+        with patch(
+            "app.services.attachment_processor._get_presidio_image_engines",
+            return_value=(None, None),
+        ):
+            result = processor.redact_image(b"fake-image")
+            assert result is None
+
+    def test_analyze_image_returns_empty_without_presidio(self, processor):
+        """When Presidio image engines fail to init, analyze_image returns []."""
+        with patch(
+            "app.services.attachment_processor._get_presidio_image_engines",
+            return_value=(None, None),
+        ):
+            result = processor.analyze_image(b"fake-image")
+            assert result == []
+
+    def test_redact_image_calls_presidio(self, processor):
+        """When Presidio is available, redact_image calls the engine and returns PNG bytes."""
+        mock_redactor = MagicMock()
+        mock_redacted_img = MagicMock()
+        mock_redactor.redact.return_value = mock_redacted_img
+
+        # Mock the save method to write known bytes
+        def fake_save(buf, format):
+            buf.write(b"\x89PNG_redacted_content")
+        mock_redacted_img.save.side_effect = fake_save
+
+        with patch(
+            "app.services.attachment_processor._get_presidio_image_engines",
+            return_value=(mock_redactor, None),
+        ):
+            # Create a minimal valid PNG (1x1 pixel)
+            from PIL import Image
+            import io
+            img = Image.new("RGB", (10, 10), "white")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            image_bytes = buf.getvalue()
+
+            result = processor.redact_image(image_bytes)
+            assert result is not None
+            assert b"PNG" in result
+            mock_redactor.redact.assert_called_once()
+
+    def test_analyze_image_returns_entities(self, processor):
+        """When Presidio is available, analyze_image returns entity dicts."""
+        mock_result = MagicMock()
+        mock_result.entity_type = "PERSON"
+        mock_result.score = 0.85
+        mock_result.left = 10
+        mock_result.top = 20
+        mock_result.width = 100
+        mock_result.height = 30
+
+        mock_analyzer = MagicMock()
+        mock_analyzer.analyze.return_value = [mock_result]
+
+        with patch(
+            "app.services.attachment_processor._get_presidio_image_engines",
+            return_value=(None, mock_analyzer),
+        ):
+            from PIL import Image
+            import io
+            img = Image.new("RGB", (10, 10), "white")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+
+            entities = processor.analyze_image(buf.getvalue())
+            assert len(entities) == 1
+            assert entities[0]["entity_type"] == "PERSON"
+            assert entities[0]["score"] == 0.85
+            assert entities[0]["left"] == 10

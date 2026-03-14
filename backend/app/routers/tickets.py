@@ -42,17 +42,24 @@ async def list_tickets():
 
 @router.get("/board", response_model=List[BoardTicket])
 async def list_board_tickets():
-    """List live tickets from the KOSIN board (safe metadata only, no PII).
+    """List live tickets from all active source systems (safe metadata only, no PII).
 
+    Uses ConnectorRouter to aggregate from all registered systems.
     Filters out [ANON] tickets and the VOLCADO parent.
     Crosses with DB to flag already-ingested tickets.
     """
     state = _get_state()
     db = state["db"]
-    kosin = state["kosin_connector"]
+    connector_router = state.get("connector_router")
 
-    # Get board issues from KOSIN
-    issues = await kosin.get_board_issues()
+    # Get board issues from all sources via router, or fallback to KOSIN only
+    if connector_router:
+        issues = await connector_router.get_all_board_issues()
+    else:
+        kosin = state["kosin_connector"]
+        issues = await kosin.get_board_issues()
+        for issue in issues:
+            issue["source_system"] = "kosin"
 
     # Get already-ingested keys from DB
     ingested_keys = await db.get_ingested_ticket_keys()
@@ -66,6 +73,7 @@ async def list_board_tickets():
         key = issue.get("key", "")
         fields = issue.get("fields", {})
         summary = fields.get("summary", "")
+        source_system = issue.get("source_system", "kosin")
 
         # Filter out [ANON] tickets and VOLCADO parent
         if "[ANON]" in summary:
@@ -85,6 +93,7 @@ async def list_board_tickets():
             status=fields.get("status", {}).get("name", "Open") if isinstance(fields.get("status"), dict) else str(fields.get("status", "Open")),
             issue_type=fields.get("issuetype", {}).get("name", "Support") if isinstance(fields.get("issuetype"), dict) else str(fields.get("issuetype", "Support")),
             already_ingested=key in ingested_keys,
+            source_system=source_system,
         ))
 
     return board_tickets
@@ -105,8 +114,18 @@ async def ingest_confirm(kosin_key: str):
     db = state["db"]
     anonymizer = state["anonymizer"]
     kosin = state["kosin_connector"]
-    jira = state["jira_connector"]
     encryption_key = state["encryption_key"]
+
+    # Resolve source connector via router
+    connector_router = state.get("connector_router")
+    source_system_name = "kosin"
+    if connector_router:
+        try:
+            source_system_name, source_connector = connector_router.get_connector(kosin_key)
+        except ValueError:
+            source_connector = state["jira_connector"]
+    else:
+        source_connector = state["jira_connector"]
 
     # Check if already ingested
     existing = await db.get_ticket_by_source_key(kosin_key)
@@ -118,9 +137,9 @@ async def ingest_confirm(kosin_key: str):
             pii_entities_found=0,
         )
 
-    # 1. Read full ticket from KOSIN/Jira
+    # 1. Read full ticket from source system
     try:
-        source_ticket = await jira.get_ticket(kosin_key)
+        source_ticket = await source_connector.get_ticket(kosin_key)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"No se pudo leer {kosin_key}: {str(e)}")
 
@@ -130,7 +149,7 @@ async def ingest_confirm(kosin_key: str):
 
     # 2. Read comments
     try:
-        comments = await jira.get_comments(kosin_key)
+        comments = await source_connector.get_comments(kosin_key)
     except Exception:
         comments = []
 
@@ -177,7 +196,7 @@ async def ingest_confirm(kosin_key: str):
 
     # 5. Save to local DB
     ticket_id = await db.create_ticket_mapping(
-        source_system="kosin-pesesg",
+        source_system=source_system_name,
         source_ticket_id=kosin_key,
         kosin_ticket_id=kosin_id,
         summary=anon_summary,
@@ -285,7 +304,6 @@ async def sync_to_client(ticket_id: int, body: SyncToClientRequest):
     """De-anonymize a comment and publish it to the source ticket."""
     state = _get_state()
     db = state["db"]
-    jira = state["jira_connector"]
     encryption_key = state["encryption_key"]
 
     ticket = await db.get_ticket(ticket_id)
@@ -308,9 +326,19 @@ async def sync_to_client(ticket_id: int, body: SyncToClientRequest):
     # De-anonymize the comment
     real_comment = Anonymizer.de_anonymize(body.comment, sub_map)
 
-    # Publish to source ticket
+    # Resolve source connector via router
     source_ticket_id = ticket["source_ticket_id"]
-    success = await jira.add_comment(source_ticket_id, real_comment)
+    connector_router = state.get("connector_router")
+    if connector_router:
+        try:
+            _, source_connector = connector_router.get_connector(source_ticket_id)
+        except ValueError:
+            source_connector = state["jira_connector"]
+    else:
+        source_connector = state["jira_connector"]
+
+    # Publish to source ticket
+    success = await source_connector.add_comment(source_ticket_id, real_comment)
 
     if not success:
         raise HTTPException(status_code=502, detail="Error publicando comentario en origen")
@@ -356,3 +384,81 @@ async def add_kosin_comment(ticket_id: int, body: dict):
     logger.info("kosin_comment_added", ticket_id=ticket_id, kosin=kosin_key, action=action_text)
 
     return {"message": f"Comentario registrado en {kosin_key}", "success": success}
+
+
+@router.get("/{ticket_id}/attachment/{attachment_index}/redacted")
+async def get_redacted_attachment(ticket_id: int, attachment_index: int = 0):
+    """Download an image attachment with PII redacted using Presidio Image Redactor.
+
+    Returns the image with PII regions blacked out as a PNG.
+    Only works for image attachments (jpg, png, bmp, tiff).
+    """
+    from fastapi.responses import Response
+    from ..services.attachment_processor import AttachmentProcessor
+
+    state = _get_state()
+    db = state["db"]
+
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    source_ticket_id = ticket["source_ticket_id"]
+
+    # Resolve source connector
+    connector_router = state.get("connector_router")
+    if connector_router:
+        try:
+            _, connector = connector_router.get_connector(source_ticket_id)
+        except ValueError:
+            connector = state["jira_connector"]
+    else:
+        connector = state["jira_connector"]
+
+    try:
+        source_ticket = await connector.get_ticket(source_ticket_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"No se pudo leer ticket origen: {e}")
+
+    attachments = source_ticket.get("attachments", [])
+    if not attachments:
+        raise HTTPException(status_code=404, detail="El ticket no tiene adjuntos")
+    if attachment_index < 0 or attachment_index >= len(attachments):
+        raise HTTPException(status_code=400, detail=f"Indice fuera de rango (0-{len(attachments)-1})")
+
+    attachment = attachments[attachment_index]
+    filename = attachment.get("filename", "unknown")
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if ext not in ("jpg", "jpeg", "png", "bmp", "tiff", "tif"):
+        raise HTTPException(status_code=400, detail=f"Solo se pueden redactar imagenes, no '{ext}'")
+
+    content_url = attachment.get("content", "")
+    if not content_url:
+        raise HTTPException(status_code=404, detail="El adjunto no tiene URL de contenido")
+
+    content_bytes = await connector.download_attachment(content_url)
+    if not content_bytes:
+        raise HTTPException(status_code=502, detail="No se pudo descargar el adjunto")
+
+    processor = AttachmentProcessor()
+    redacted_bytes = processor.redact_image(content_bytes)
+
+    if redacted_bytes is None:
+        raise HTTPException(
+            status_code=501,
+            detail="Presidio Image Redactor no disponible. Instalar: pip install presidio-image-redactor"
+        )
+
+    await db.add_audit_log(
+        operator_id="operator",
+        action="view_redacted_attachment",
+        ticket_mapping_id=ticket_id,
+        details=f"attachment={filename}, index={attachment_index}",
+    )
+
+    return Response(
+        content=redacted_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": f'inline; filename="redacted_{filename}.png"'},
+    )

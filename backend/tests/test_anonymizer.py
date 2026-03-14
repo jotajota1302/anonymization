@@ -130,3 +130,165 @@ class TestEncryptDecrypt:
         key_str = base64.b64encode(key).decode()
         restored = Anonymizer.key_from_string(key_str)
         assert restored == key
+
+
+# === NEW TESTS: Regex new patterns, Presidio, Composite ===
+
+from app.services.detection import RegexDetector
+
+
+class TestRegexDetectorNewPatterns:
+    """Tests for newly added regex patterns: IPv6, DIRECCION, CODIGO_POSTAL, MATRICULA."""
+
+    def setup_method(self):
+        self.detector = RegexDetector()
+
+    def test_detect_ipv6_full(self):
+        text = "El servidor tiene IPv6 2001:0db8:85a3:0000:0000:8a2e:0370:7334"
+        entities = self.detector.detect(text)
+        ipv6 = [e for e in entities if e.entity_type == "IPV6"]
+        assert len(ipv6) == 1
+        assert "2001:0db8" in ipv6[0].text
+
+    def test_detect_ipv6_abbreviated(self):
+        text = "Direccion IPv6: ::1"
+        entities = self.detector.detect(text)
+        ipv6 = [e for e in entities if e.entity_type == "IPV6"]
+        assert len(ipv6) == 1
+        assert "::1" in ipv6[0].text
+
+    def test_detect_direccion_calle(self):
+        text = "Vive en Calle Gran Via 28"
+        entities = self.detector.detect(text)
+        dirs = [e for e in entities if e.entity_type == "DIRECCION"]
+        assert len(dirs) == 1
+        assert "Calle Gran Via 28" in dirs[0].text
+
+    def test_detect_direccion_avenida(self):
+        text = "Oficina en Avenida Diagonal 450"
+        entities = self.detector.detect(text)
+        dirs = [e for e in entities if e.entity_type == "DIRECCION"]
+        assert len(dirs) == 1
+        assert "Avenida Diagonal 450" in dirs[0].text
+
+    def test_detect_direccion_plaza(self):
+        text = "Reunion en Plaza de la Marina 5"
+        entities = self.detector.detect(text)
+        dirs = [e for e in entities if e.entity_type == "DIRECCION"]
+        assert len(dirs) == 1
+        assert "Plaza" in dirs[0].text
+
+    def test_detect_codigo_postal(self):
+        text = "Codigo postal 28014 de Madrid"
+        entities = self.detector.detect(text)
+        cps = [e for e in entities if e.entity_type == "CODIGO_POSTAL"]
+        assert len(cps) == 1
+        assert cps[0].text == "28014"
+
+    def test_detect_codigo_postal_invalid_prefix(self):
+        text = "El numero 99999 no es un CP valido"
+        entities = self.detector.detect(text)
+        cps = [e for e in entities if e.entity_type == "CODIGO_POSTAL"]
+        assert len(cps) == 0
+
+    def test_detect_matricula_guion(self):
+        text = "Vehiculo con matricula 4521-BKF"
+        entities = self.detector.detect(text)
+        mats = [e for e in entities if e.entity_type == "MATRICULA"]
+        assert len(mats) == 1
+        assert "4521" in mats[0].text
+
+    def test_detect_matricula_espacio(self):
+        text = "Matricula 2198 FNM del coche"
+        entities = self.detector.detect(text)
+        mats = [e for e in entities if e.entity_type == "MATRICULA"]
+        assert len(mats) == 1
+        assert "2198" in mats[0].text
+
+    def test_detect_matricula_sin_separador(self):
+        text = "Matricula 7834GHT del vehiculo"
+        entities = self.detector.detect(text)
+        mats = [e for e in entities if e.entity_type == "MATRICULA"]
+        assert len(mats) == 1
+        assert "7834GHT" in mats[0].text
+
+
+class TestPresidioDetector:
+    """Tests for Presidio NLP-based detection. Skipped if presidio not installed."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        try:
+            from app.services.detection import PresidioDetector
+            self.detector = PresidioDetector()
+            self.available = True
+        except (ImportError, OSError):
+            self.available = False
+
+    def test_detect_person_name(self):
+        if not self.available:
+            pytest.skip("Presidio or spaCy model not installed")
+        entities = self.detector.detect("La usuaria Elena Torres reporta un fallo")
+        personas = [e for e in entities if e.entity_type == "PERSONA"]
+        assert len(personas) >= 1
+        assert any("Elena" in p.text or "Torres" in p.text for p in personas)
+
+    def test_detect_organization(self):
+        if not self.available:
+            pytest.skip("Presidio or spaCy model not installed")
+        entities = self.detector.detect("Trabaja en NTT DATA desde hace 5 anos")
+        orgs = [e for e in entities if e.entity_type == "ORGANIZACION"]
+        assert len(orgs) >= 1
+
+    def test_detect_location(self):
+        if not self.available:
+            pytest.skip("Presidio or spaCy model not installed")
+        entities = self.detector.detect("La oficina esta en Madrid, Espana")
+        locations = [e for e in entities if e.entity_type == "UBICACION"]
+        assert len(locations) >= 1
+
+
+class TestCompositeDetector:
+    """Tests for CompositeDetector merge/dedup logic."""
+
+    def test_composite_uses_regex_at_minimum(self):
+        from app.services.detection import CompositeDetector, RegexDetector
+        detector = CompositeDetector(detectors=[RegexDetector()])
+        entities = detector.detect("Email: user@test.com, IP: 10.0.0.1")
+        types = {e.entity_type for e in entities}
+        assert "EMAIL" in types
+        assert "IP" in types
+
+    def test_composite_deduplicates_overlaps(self):
+        from app.services.detection import CompositeDetector, RegexDetector
+
+        # Two regex detectors → same results duplicated → should be deduped
+        detector = CompositeDetector(detectors=[RegexDetector(), RegexDetector()])
+        entities = detector.detect("DNI: 12345678A")
+        dnis = [e for e in entities if e.entity_type == "DNI"]
+        assert len(dnis) == 1
+
+    def test_composite_prefers_longer_entity(self):
+        from app.services.detection import CompositeDetector, DetectionService
+
+        class ShortDetector(DetectionService):
+            def detect(self, text):
+                return [PiiEntity(text="Juan", entity_type="PERSONA", start=0, end=4)]
+
+        class LongDetector(DetectionService):
+            def detect(self, text):
+                return [PiiEntity(text="Juan Garcia", entity_type="PERSONA", start=0, end=11)]
+
+        detector = CompositeDetector(detectors=[ShortDetector(), LongDetector()])
+        entities = detector.detect("Juan Garcia reporta error")
+        personas = [e for e in entities if e.entity_type == "PERSONA"]
+        assert len(personas) == 1
+        assert personas[0].text == "Juan Garcia"
+
+    def test_composite_new_patterns(self):
+        from app.services.detection import CompositeDetector, RegexDetector
+        detector = CompositeDetector(detectors=[RegexDetector()])
+        entities = detector.detect("Matricula 4521-BKF, CP 28014")
+        types = {e.entity_type for e in entities}
+        assert "MATRICULA" in types
+        assert "CODIGO_POSTAL" in types

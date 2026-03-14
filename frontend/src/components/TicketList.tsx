@@ -16,6 +16,12 @@ const statusConfig: Record<string, { bg: string; color: string }> = {
   "To Do":       { bg: "#DFE1E6", color: "#42526E" },
 };
 
+const sourceSystemConfig: Record<string, { bg: string; color: string; label: string }> = {
+  kosin:      { bg: "#E8EAF6", color: "#3F51B5", label: "KOSIN" },
+  remedy:     { bg: "#FFE0B2", color: "#E65100", label: "Remedy" },
+  servicenow: { bg: "#E1F5FE", color: "#0277BD", label: "ServiceNow" },
+};
+
 interface Props {
   boardTickets: BoardTicket[];
   tickets: TicketSummary[];
@@ -110,6 +116,17 @@ export function TicketList({
                     <span className="text-[10px] text-[#6B778C]">
                       {bt.issue_type}
                     </span>
+                    {(() => {
+                      const src = sourceSystemConfig[bt.source_system] || sourceSystemConfig.kosin;
+                      return (
+                        <span
+                          className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
+                          style={{ backgroundColor: src.bg, color: src.color }}
+                        >
+                          {src.label}
+                        </span>
+                      );
+                    })()}
                   </div>
                 </div>
               );

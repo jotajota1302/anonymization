@@ -17,7 +17,15 @@ async def read_attachment(ticket_id: str, attachment_index: int = 0) -> str:
     from ..main import app_state
     from ..services.attachment_processor import AttachmentProcessor
 
-    connector = app_state["jira_connector"]
+    # Use router to resolve connector by ticket prefix, fallback to jira_connector
+    router = app_state.get("connector_router")
+    if router:
+        try:
+            _, connector = router.get_connector(ticket_id)
+        except ValueError:
+            connector = app_state["jira_connector"]
+    else:
+        connector = app_state["jira_connector"]
     anonymizer = app_state["anonymizer"]
 
     try:
@@ -55,9 +63,22 @@ async def read_attachment(ticket_id: str, attachment_index: int = 0) -> str:
         # Anonymize the extracted text
         anonymized_text, _ = anonymizer.anonymize(text)
 
+        # For images, also try Presidio image analysis for extra PII context
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        image_pii_note = ""
+        if ext in ("jpg", "jpeg", "png", "bmp", "tiff", "tif"):
+            image_entities = processor.analyze_image(content_bytes)
+            if image_entities:
+                unique_types = {e["entity_type"] for e in image_entities}
+                image_pii_note = (
+                    f"\n\n[Presidio Image: {len(image_entities)} entidades PII detectadas "
+                    f"en la imagen — tipos: {', '.join(sorted(unique_types))}. "
+                    f"Imagen redactada disponible via API.]"
+                )
+
         return (
             f"Contenido del adjunto '{filename}' ({format_used}):\n\n"
-            f"{anonymized_text}"
+            f"{anonymized_text}{image_pii_note}"
         )
 
     except Exception as e:

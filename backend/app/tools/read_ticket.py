@@ -14,7 +14,15 @@ async def read_ticket(ticket_id: str) -> str:
     """
     from ..main import app_state
 
-    connector = app_state["jira_connector"]
+    # Use router to resolve connector by ticket prefix, fallback to jira_connector
+    router = app_state.get("connector_router")
+    if router:
+        try:
+            _, connector = router.get_connector(ticket_id)
+        except ValueError:
+            connector = app_state["jira_connector"]
+    else:
+        connector = app_state["jira_connector"]
     anonymizer = app_state["anonymizer"]
 
     try:
