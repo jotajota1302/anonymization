@@ -2,18 +2,18 @@
 
 import { TicketSummary } from "@/types";
 
-const priorityConfig: Record<string, { color: string; bg: string; label: string }> = {
-  critical: { color: "#DE350B", bg: "#FFEBE6", label: "Critica" },
-  high:     { color: "#FF991F", bg: "#FFF0B3", label: "Alta" },
-  medium:   { color: "#0052CC", bg: "#DEEBFF", label: "Media" },
-  low:      { color: "#00875A", bg: "#E3FCEF", label: "Baja" },
+const priorityConfig: Record<string, { color: string; shadow: string }> = {
+  critical: { color: "#EF4444", shadow: "rgba(239,68,68,0.5)" },
+  high:     { color: "#F59E0B", shadow: "rgba(245,158,11,0.5)" },
+  medium:   { color: "#3B82F6", shadow: "rgba(59,130,246,0.5)" },
+  low:      { color: "#10B981", shadow: "rgba(16,185,129,0.5)" },
 };
 
-const statusConfig: Record<string, { bg: string; color: string; label: string }> = {
-  open:        { bg: "#DFE1E6", color: "#42526E", label: "Pendiente" },
-  in_progress: { bg: "#DEEBFF", color: "#0052CC", label: "En progreso" },
-  resolved:    { bg: "#E3FCEF", color: "#00875A", label: "Resuelto" },
-  closed:      { bg: "#F4F5F7", color: "#6B778C", label: "Cerrado" },
+const statusConfig: Record<string, string> = {
+  open: "Pendiente",
+  in_progress: "En progreso",
+  resolved: "Resuelto",
+  closed: "Cerrado",
 };
 
 interface Props {
@@ -24,56 +24,49 @@ interface Props {
 
 export function TicketCard({ ticket, isSelected, onClick }: Props) {
   const priority = priorityConfig[ticket.priority] || priorityConfig.medium;
-  const status = statusConfig[ticket.status] || statusConfig.open;
+  const statusLabel = statusConfig[ticket.status] || ticket.status;
+  const isActive = ticket.status === "in_progress";
 
   return (
     <div
+      role="listitem"
       onClick={onClick}
-      className={`px-4 py-3 border-b border-[#DFE1E6] cursor-pointer transition-all duration-100 ${
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+      tabIndex={0}
+      aria-selected={isSelected}
+      aria-label={`Ticket ${ticket.kosin_id}, estado ${statusLabel}`}
+      className={`p-3 rounded-lg cursor-pointer transition-all ${
         isSelected
-          ? "bg-[#E9F2FF] border-l-[3px] border-l-[#0052CC]"
-          : "hover:bg-[#F4F5F7] border-l-[3px] border-l-transparent"
+          ? "bg-primary/10 border border-primary/30"
+          : "bg-slate-800/40 border border-slate-700/50 hover:bg-slate-800/60"
       }`}
     >
-      {/* Top row: KOSIN ID + Priority icon */}
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          {/* Issue type icon */}
-          <svg width="16" height="16" viewBox="0 0 16 16" className="shrink-0">
-            <rect x="1" y="1" width="14" height="14" rx="2" fill={priority.color} opacity="0.15"/>
-            <path d="M4 8h8M8 4v8" stroke={priority.color} strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-          <span className="text-[13px] font-medium text-[#0052CC]">
-            {ticket.kosin_id}
-          </span>
-        </div>
-        {/* Priority badge */}
-        <span
-          className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
-          style={{ backgroundColor: priority.bg, color: priority.color }}
-        >
-          {priority.label}
+      <div className="flex justify-between items-start mb-2">
+        <span className={`text-xs font-bold ${isSelected ? "text-white" : "text-primary"}`}>
+          [ANON] {ticket.kosin_id}
         </span>
+        <div className="flex gap-1">
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${isActive ? "animate-pulse" : ""}`}
+            style={{ backgroundColor: priority.color, boxShadow: `0 0 8px ${priority.shadow}` }}
+            aria-hidden="true"
+          />
+        </div>
       </div>
-
-      {/* Summary */}
-      <p className="text-[13px] text-[#172B4D] leading-snug line-clamp-2 mb-2 ml-6">
+      <p className={`text-xs font-medium line-clamp-2 ${isSelected ? "text-slate-200" : "text-slate-300"}`}>
         {ticket.summary}
       </p>
-
-      {/* Bottom row: Status + date */}
-      <div className="flex items-center justify-between ml-6">
-        <span
-          className="text-[11px] font-semibold uppercase px-2 py-0.5 rounded-sm"
-          style={{ backgroundColor: status.bg, color: status.color }}
-        >
-          {status.label}
-        </span>
-        <span className="text-[11px] text-[#6B778C]">
-          {new Date(ticket.created_at).toLocaleDateString("es-ES", {
-            day: "2-digit",
-            month: "short",
-          })}
+      <div className="mt-3 flex items-center gap-2">
+        <div className="flex -space-x-2">
+          <div className="w-5 h-5 rounded-full border border-slate-900 bg-slate-700 flex items-center justify-center text-[7px] font-bold text-slate-400">
+            OP
+          </div>
+          <div className="w-5 h-5 rounded-full border border-slate-900 bg-primary flex items-center justify-center text-[8px] font-bold text-white">
+            AI
+          </div>
+        </div>
+        <span className="text-[10px] text-slate-400">
+          {isActive ? "Activo ahora" : statusLabel}
         </span>
       </div>
     </div>

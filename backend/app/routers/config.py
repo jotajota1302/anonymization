@@ -1,11 +1,11 @@
-"""Configuration API router for managing integrations and general settings."""
+"""Configuration API router for managing integrations, anonymization, and general settings."""
 
 import json
 import httpx
 import structlog
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict
 
 logger = structlog.get_logger()
 
@@ -182,3 +182,148 @@ async def update_general_settings(body: GeneralSettings):
                 polling_interval_sec=body.polling_interval_sec
             )
     return {"status": "ok", "polling_interval_sec": body.polling_interval_sec}
+
+
+# --- Anonymization settings endpoints ---
+
+# Default anonymization config (seeded on first GET if not in DB)
+_DEFAULT_ANON_CONFIG = {
+    "detector_type": "composite",
+    "sensitivity": 65,
+    "pii_rules": {
+        "names": True,
+        "emails": True,
+        "phones": True,
+        "ips": True,
+        "cards": True,
+        "addresses": False,
+        "dni": True,
+        "license_plates": False,
+    },
+    "substitution_technique": "synthetic",
+}
+
+
+async def _get_anon_config(db) -> dict:
+    """Get anonymization config from system_config table, seeding defaults if absent."""
+    row = await db.get_system_config("anonymization")
+    if row and row.get("extra_config"):
+        raw = row["extra_config"]
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif isinstance(raw, dict):
+            return raw
+    # Seed defaults
+    await db.upsert_system_config(
+        "anonymization",
+        display_name="Anonymization Settings",
+        system_type="internal",
+        connector_type="none",
+        extra_config=json.dumps(_DEFAULT_ANON_CONFIG),
+    )
+    return dict(_DEFAULT_ANON_CONFIG)
+
+
+@router.get("/anonymization")
+async def get_anonymization_settings():
+    db = _get_app_state().get("db")
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    config = await _get_anon_config(db)
+
+    # Report which detector is actually active
+    state = _get_app_state()
+    detector = state.get("detector")
+    active_detector = "unknown"
+    if detector:
+        cls_name = type(detector).__name__
+        if "Composite" in cls_name:
+            active_detector = "composite"
+        elif "Presidio" in cls_name:
+            active_detector = "presidio"
+        elif "Regex" in cls_name:
+            active_detector = "regex"
+
+    # Check if presidio is available
+    presidio_available = False
+    try:
+        from ..services.detection import PresidioDetector  # noqa: F401
+        import importlib
+        presidio_available = importlib.util.find_spec("presidio_analyzer") is not None
+    except Exception:
+        pass
+
+    return {
+        **config,
+        "active_detector": active_detector,
+        "presidio_available": presidio_available,
+    }
+
+
+class AnonymizationUpdate(BaseModel):
+    detector_type: Optional[str] = None  # "regex", "presidio", "composite"
+    sensitivity: Optional[int] = None  # 0-100
+    pii_rules: Optional[Dict[str, bool]] = None
+    substitution_technique: Optional[str] = None  # "redacted", "synthetic", "aes256"
+
+
+@router.put("/anonymization")
+async def update_anonymization_settings(body: AnonymizationUpdate):
+    db = _get_app_state().get("db")
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    config = await _get_anon_config(db)
+
+    if body.detector_type is not None:
+        if body.detector_type not in ("regex", "presidio", "composite"):
+            raise HTTPException(status_code=400, detail="detector_type must be 'regex', 'presidio', or 'composite'")
+        config["detector_type"] = body.detector_type
+
+    if body.sensitivity is not None:
+        config["sensitivity"] = max(0, min(100, body.sensitivity))
+
+    if body.pii_rules is not None:
+        config["pii_rules"] = {**config.get("pii_rules", {}), **body.pii_rules}
+
+    if body.substitution_technique is not None:
+        config["substitution_technique"] = body.substitution_technique
+
+    # Persist
+    await db.upsert_system_config(
+        "anonymization",
+        extra_config=json.dumps(config),
+    )
+
+    # Hot-reload detector if changed
+    if body.detector_type is not None:
+        try:
+            state = _get_app_state()
+            new_detector = _create_detector(body.detector_type)
+            state["detector"] = new_detector
+            # Recreate anonymizer with new detector
+            from ..services.anonymizer import Anonymizer
+            state["anonymizer"] = Anonymizer(detector=new_detector)
+            logger.info("detector_hot_reloaded", type=body.detector_type)
+        except Exception as e:
+            logger.error("detector_hot_reload_failed", error=str(e))
+            return {**config, "warning": f"Config guardada pero fallo al cambiar detector: {str(e)}"}
+
+    return config
+
+
+def _create_detector(detector_type: str):
+    """Create a new detector instance by type."""
+    if detector_type == "regex":
+        from ..services.detection import RegexDetector
+        return RegexDetector()
+    elif detector_type == "presidio":
+        from ..services.detection import PresidioDetector
+        return PresidioDetector()
+    else:  # composite
+        from ..services.detection import CompositeDetector
+        return CompositeDetector()

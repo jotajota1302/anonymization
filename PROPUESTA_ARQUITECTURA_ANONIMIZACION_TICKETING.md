@@ -1,10 +1,10 @@
 # Propuesta de Arquitectura: Plataforma de Anonimizacion de Ticketing
 
-**Version:** 1.4
+**Version:** 1.5
 **Fecha original:** 13 de Marzo de 2026
 **Ultima actualizacion:** 14 de Marzo de 2026
 **Equipo:** NTT DATA EMEAL
-**Estado:** Piloto implementado con Presidio NLP, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional, renderizado Markdown en chat y 56 tests — pendiente validacion (Fase 4)
+**Estado:** Piloto implementado con Presidio NLP configurable desde UI, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional (integraciones + anonimizacion + admin tickets), renderizado Markdown en chat, notificaciones toast/modal y 56 tests — pendiente validacion (Fase 4)
 
 ---
 
@@ -704,6 +704,9 @@ CREATE TABLE system_config (
 - `operator_id` siempre vale `"operator"` (sin autenticacion real)
 - **v1.4:** Tabla `system_config` para gestionar integraciones desde la UI. Los valores por defecto
   se copian desde `.env` al primer arranque (seed). Tokens enmascarados en la API (`****XXXX`)
+- **v1.5:** `system_config` tambien almacena configuracion de anonimizacion (key `"anonymization"`)
+  en `extra_config` como JSON: `{detector_type, sensitivity, pii_rules, substitution_technique}`.
+  El detector se recarga en caliente al cambiar desde la UI sin reiniciar el servidor
 
 ---
 
@@ -717,7 +720,7 @@ CREATE TABLE system_config (
 | Backend | Python 3.11+ / FastAPI | Async nativo, ideal para streaming LLM, tipado |
 | Base de datos | SQLite (aiosqlite) | Sin infraestructura adicional, suficiente para piloto |
 | Agente IA | LangChain + **Ollama (dev) / AzureChatOpenAI (prod)** | Cambio vs propuesta: soporte dual para desarrollo local sin Azure |
-| Deteccion PII | **CompositeDetector** (Presidio NLP + RegexDetector) | NER español + regex estructurado. Configurable via `PII_DETECTOR` |
+| Deteccion PII | **CompositeDetector** (Presidio NLP + RegexDetector) | NER español + regex estructurado. Configurable via UI `/config` o `PII_DETECTOR` env |
 | Redaccion imagenes | **Presidio Image Redactor** + Tesseract OCR | PII detectada y tapada directamente en imagenes adjuntas |
 | Conectores | **httpx** (REST directo) | Cambio vs propuesta: no se usa libreria `jira` de Atlassian |
 | Comunicacion | REST (fetch) + WebSocket (nativo) | WebSocket para streaming de tokens del agente |
@@ -864,6 +867,13 @@ como funcionalidad del sistema. No hay mecanismo automatico de bloqueo ni deriva
   a 2 secciones: Incidencias y Configuracion. Panel Admin integrado como tab "Tickets" dentro
   de Configuracion. Mensajes del agente renderizados con Markdown (`react-markdown`). Chips
   filtrados para excluir tokens PII redactados. Modal de confirmacion en lugar de `alert()` nativo
+- **v1.5:** Pestana Anonimizacion conectada a API real (`GET/PUT /api/config/anonymization`):
+  selector de motor de deteccion (Regex / Presidio / Compuesto) con hot-reload, reglas PII
+  con toggles individuales (DNI, matriculas, IBAN, etc.), nivel de sensibilidad, tecnica de
+  sustitucion. Indicadores de estado: badge "ACTIVO"/"NO INSTALADO" para Presidio.
+  `alert()`/`confirm()` nativos reemplazados por toast notifications y modal estilizado en
+  toda la aplicacion (page.tsx). Error de ingesta KOSIN ahora muestra detalle HTTP real.
+  `create_ticket()` retorna `(key, error)` para mejor diagnostico
 
 ---
 
@@ -966,11 +976,11 @@ ticketing-anonymization/
 │       │   ├── tickets.py               # REST: CRUD + ingest + board + sync-to-client + kosin-comment
 │       │   ├── chat.py                  # WebSocket: streaming chat con agente
 │       │   ├── admin.py                 # Admin: listar/eliminar tickets ingestados
-│       │   └── config.py               # Config API: integraciones CRUD + test conexion + general settings
+│       │   └── config.py               # Config API: integraciones CRUD + test conexion + general + anonymization settings
 │       │
 │       ├── services/
 │       │   ├── anonymizer.py            # Anonymizer: mapa sustitucion + AES-256-GCM + filtro + de_anonymize
-│       │   ├── detection.py             # DetectionService ABC + RegexDetector + AttachmentDetector
+│       │   ├── detection.py             # DetectionService ABC + RegexDetector + PresidioDetector + CompositeDetector + AttachmentDetector
 │       │   ├── attachment_processor.py  # Extraccion texto: PDF, OCR, DOCX, XLSX, PPTX, plaintext
 │       │   ├── agent.py                 # AnonymizationAgent (LangChain, 5 tools, streaming, chips)
 │       │   └── database.py              # DatabaseService async (aiosqlite, schema, CRUD)
@@ -1008,8 +1018,8 @@ ticketing-anonymization/
     └── src/
         ├── app/
         │   ├── layout.tsx               # Root layout (lang="es")
-        │   ├── page.tsx                 # SPA: orquestacion + sync-to-client + close ticket
-        │   ├── config/page.tsx          # Configuracion: General, Anonimizacion, Integraciones, Tickets
+        │   ├── page.tsx                 # SPA: orquestacion + sync-to-client + close ticket + toast/modal
+        │   ├── config/page.tsx          # Configuracion: General, Anonimizacion (detector/PII/sensibilidad), Integraciones, Tickets
         │   ├── admin/page.tsx           # Redirige a /config (funcionalidad integrada)
         │   └── globals.css
         ├── components/
@@ -1038,7 +1048,7 @@ ticketing-anonymization/
 - `docker-compose.yml`
 
 **Archivos nuevos (no previstos en propuesta v1.0):**
-- `services/detection.py` — DetectionService ABC con RegexDetector y AttachmentDetector
+- `services/detection.py` — DetectionService ABC con RegexDetector, PresidioDetector, CompositeDetector y AttachmentDetector
 - `services/attachment_processor.py` — Extraccion de texto de adjuntos (PDF, OCR, Office)
 - `tools/read_attachment.py` — Tool LangChain para leer y anonimizar adjuntos
 - `tests/` — 35 tests pytest (anonymizer, attachments, roundtrip de-anonymize)

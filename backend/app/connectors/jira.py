@@ -144,7 +144,7 @@ class MockJiraConnector(TicketConnector):
 
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium", **kwargs
-    ) -> Optional[str]:
+    ) -> tuple[Optional[str], Optional[str]]:
         ticket_num = len(self.tickets) + 101
         key = f"PROJ-{ticket_num}"
         self.tickets[key] = {
@@ -158,7 +158,7 @@ class MockJiraConnector(TicketConnector):
             "assignee": "Equipo Soporte Offshore",
         }
         self.comments[key] = []
-        return key
+        return key, None
 
 
 class JiraConnector(TicketConnector):
@@ -257,6 +257,6 @@ class JiraConnector(TicketConnector):
 
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium", **kwargs
-    ) -> Optional[str]:
+    ) -> tuple[Optional[str], Optional[str]]:
         logger.warning("jira_create_ticket: use KOSIN connector for creating tickets")
-        return None
+        return None, "Not implemented for real Jira"

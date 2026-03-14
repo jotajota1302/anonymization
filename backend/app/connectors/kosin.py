@@ -94,8 +94,9 @@ class KosinConnector(TicketConnector):
 
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium", **kwargs
-    ) -> Optional[str]:
-        """Create a ticket in KOSIN. If parent_key is given, creates a Sub-Requirements subtask."""
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Create a ticket in KOSIN. If parent_key is given, creates a Sub-Requirements subtask.
+        Returns (ticket_key, error_message). On success error_message is None."""
         parent_key = kwargs.get("parent_key")
 
         # Valid priorities in KOSIN
@@ -140,10 +141,14 @@ class KosinConnector(TicketConnector):
                 data = resp.json()
                 ticket_key = data.get("key", "")
                 logger.info("kosin_ticket_created", key=ticket_key)
-                return ticket_key
+                return ticket_key, None
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            logger.error("kosin_create_failed", status=e.response.status_code, body=body)
+            return None, f"HTTP {e.response.status_code}: {body}"
         except httpx.HTTPError as e:
             logger.error("kosin_create_failed", error=str(e))
-            return None
+            return None, str(e)
 
     async def delete_ticket(self, ticket_id: str) -> bool:
         """Delete a ticket from KOSIN via REST API."""
@@ -241,7 +246,7 @@ class MockKosinConnector(TicketConnector):
 
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium", **kwargs
-    ) -> Optional[str]:
+    ) -> tuple[Optional[str], Optional[str]]:
         self._counter += 1
         key = f"KOS-{self._counter:03d}"
         self.tickets[key] = {
@@ -253,7 +258,7 @@ class MockKosinConnector(TicketConnector):
         }
         self.comments[key] = []
         logger.info("mock_kosin_ticket_created", key=key)
-        return key
+        return key, None
 
     async def delete_ticket(self, ticket_id: str) -> bool:
         if ticket_id in self.tickets:

@@ -26,6 +26,19 @@ export default function Home() {
     setIsIngesting,
   } = useAppStore();
 
+  // Toast notification state
+  const [toast, setToast] = useState<{ message: string; type: "error" | "success" } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const showToast = useCallback((message: string, type: "error" | "success" = "error") => {
+    setToast({ message, type });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 6000);
+  }, []);
+
+  // Confirm modal state (replaces native confirm())
+  const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+
   const clientIdRef = useRef<string>("");
   const [clientId, setClientId] = useState("operator");
 
@@ -118,10 +131,10 @@ export default function Home() {
           handleSelectTicket(data.ticket_id);
         } else {
           const err = await res.json();
-          alert(`Error al ingestar: ${err.detail || "Error desconocido"}`);
+          showToast(`Error al ingestar: ${err.detail || "Error desconocido"}`);
         }
       } catch (err) {
-        alert("Error de red al ingestar el ticket");
+        showToast("Error de red al ingestar el ticket");
       } finally {
         setIsIngesting(false);
       }
@@ -170,18 +183,17 @@ export default function Home() {
         });
         if (!res.ok) {
           const err = await res.json();
-          alert(`Error al sincronizar: ${err.detail || "Error desconocido"}`);
+          showToast(`Error al sincronizar: ${err.detail || "Error desconocido"}`);
         }
       } catch (err) {
-        alert("Error de red al sincronizar con origen");
+        showToast("Error de red al sincronizar con origen");
       }
     },
     [selectedTicketId]
   );
 
-  const handleCloseTicket = useCallback(async () => {
+  const doCloseTicket = useCallback(async () => {
     if (!selectedTicketId) return;
-    if (!confirm("¿Cerrar el ticket definitivamente? El mapa de sustitucion sera destruido permanentemente.")) return;
     try {
       await fetch(`${API_URL}/api/tickets/${selectedTicketId}/status`, {
         method: "PUT",
@@ -193,6 +205,15 @@ export default function Home() {
       console.error("Failed to close ticket:", err);
     }
   }, [selectedTicketId, fetchTickets]);
+
+  const handleCloseTicket = useCallback(() => {
+    if (!selectedTicketId) return;
+    setConfirmModal({
+      title: "Cerrar ticket definitivamente",
+      message: "El mapa de sustitucion sera destruido permanentemente. Esta accion no se puede deshacer.",
+      onConfirm: () => { doCloseTicket(); setConfirmModal(null); },
+    });
+  }, [selectedTicketId, doCloseTicket]);
 
   const selectedBoardTicket = selectedBoardKey
     ? boardTickets.find((bt) => bt.key === selectedBoardKey) || null
@@ -248,6 +269,47 @@ export default function Home() {
 
       {/* Command Palette (Ctrl+K) */}
       <CommandPalette onSelectTicket={handleSelectTicket} onSelectBoardTicket={handleSelectBoardTicket} />
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-4 fade-in duration-300">
+          <div className={`flex items-center gap-3 px-5 py-3 rounded-lg shadow-lg border text-sm font-medium ${
+            toast.type === "error"
+              ? "bg-red-50 border-red-200 text-red-800"
+              : "bg-green-50 border-green-200 text-green-800"
+          }`}>
+            <span>{toast.type === "error" ? "\u26A0" : "\u2713"}</span>
+            <span>{toast.message}</span>
+            <button onClick={() => setToast(null)} className="ml-2 text-current opacity-50 hover:opacity-100">&times;</button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm modal */}
+      {confirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 border border-slate-200">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-900">{confirmModal.title}</h3>
+            </div>
+            <p className="text-sm text-slate-600 mb-6 ml-[52px]">{confirmModal.message}</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setConfirmModal(null)} className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                Cancelar
+              </button>
+              <button onClick={confirmModal.onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors">
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

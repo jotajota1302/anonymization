@@ -41,6 +41,6 @@ class TicketConnector(ABC):
     async def create_ticket(
         self, summary: str, description: str, priority: str = "Medium",
         **kwargs
-    ) -> Optional[str]:
-        """Create a new ticket. Returns the ticket key/ID."""
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Create a new ticket. Returns (ticket_key, error_message)."""
         ...

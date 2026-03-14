@@ -3,7 +3,61 @@
 import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/stores/appStore";
 import { ChatMessage } from "./ChatMessage";
+import { EscalationModal, EscalationData } from "./EscalationModal";
 import { BoardTicket } from "@/types";
+
+// Reusable SVG icons
+const IconShield = ({ size = 24, className = "" }: { size?: number; className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+  </svg>
+);
+const IconChat = ({ size = 24, className = "" }: { size?: number; className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+  </svg>
+);
+const IconLock = ({ size = 24, className = "" }: { size?: number; className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+);
+const IconAgent = ({ className = "" }: { className?: string }) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className={className}>
+    <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7.001 7.001 0 0113 22h-2a7.001 7.001 0 01-6.93-6H3a1 1 0 110-2h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2z"/>
+  </svg>
+);
+const IconSend = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+  </svg>
+);
+const IconSync = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+  </svg>
+);
+const IconBolt = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+  </svg>
+);
+const IconPriority = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+  </svg>
+);
+const IconShieldCheck = ({ size = 24, className = "" }: { size?: number; className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 12 15 15 10"/>
+  </svg>
+);
+const IconClip = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+  </svg>
+);
 
 interface Props {
   ticketId: number | null;
@@ -15,28 +69,17 @@ interface Props {
   onConfirmIngest: (key: string) => void;
 }
 
-export function ChatPanel({
-  ticketId,
-  boardTicket,
-  onSendMessage,
-  onFinishTicket,
-  onSyncToClient,
-  onCloseTicket,
-  onConfirmIngest,
-}: Props) {
+export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket, onSyncToClient, onCloseTicket, onConfirmIngest }: Props) {
   const [input, setInput] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showEscalation, setShowEscalation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { chatMessages, streamingContent, isStreaming, isIngesting, tickets, suggestedChips } =
-    useAppStore();
-
+  const { chatMessages, streamingContent, isStreaming, isIngesting, tickets, suggestedChips } = useAppStore();
   const messages = ticketId ? chatMessages[ticketId] || [] : [];
   const ticket = tickets.find((t) => t.id === ticketId);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingContent]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, streamingContent]);
 
   const handleSend = (text?: string, isChip: boolean = false) => {
     const msg = (text || input).trim();
@@ -46,114 +89,86 @@ export function ChatPanel({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
-  // Empty state - nothing selected
+  // Empty state
   if (!ticketId && !boardTicket) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center">
-          <svg className="w-20 h-20 mx-auto mb-4 text-[#C1C7D0]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
-              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-          </svg>
-          <p className="text-[15px] font-medium text-[#6B778C]">
-            Selecciona una incidencia
-          </p>
-          <p className="text-[12px] text-[#A5ADBA] mt-1">
-            Elige un ticket del panel izquierdo para iniciar
-          </p>
+      <div className="flex-1 flex items-center justify-center bg-slate-50/50">
+        <div className="text-center max-w-md">
+          <div className="w-20 h-20 mx-auto mb-6 bg-primary/5 rounded-2xl flex items-center justify-center border border-primary/10">
+            <IconShield size={36} className="text-primary" />
+          </div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">Plataforma de Anonimizacion</h2>
+          <p className="text-sm text-slate-500 mb-8">Selecciona una incidencia del panel izquierdo para comenzar a trabajar de forma segura</p>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { icon: <IconShield size={18} className="text-primary" />, title: "Anonimizacion", desc: "Datos protegidos" },
+              { icon: <IconChat size={18} className="text-primary" />, title: "Asistente IA", desc: "Guia inteligente" },
+              { icon: <IconLock size={18} className="text-primary" />, title: "Cifrado AES-256", desc: "Extremo a extremo" },
+            ].map((f, i) => (
+              <div key={i} className="p-4 rounded-xl bg-white border border-slate-200 shadow-sm text-center">
+                <div className="w-10 h-10 mx-auto mb-2 bg-primary/10 rounded-lg flex items-center justify-center">{f.icon}</div>
+                <p className="text-xs font-semibold text-slate-900 mb-0.5">{f.title}</p>
+                <p className="text-[10px] text-slate-500">{f.desc}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
-  // Pre-ingest state - board ticket selected but not yet ingested
+  // Pre-ingest
   if (boardTicket && !ticketId) {
-    const priorityColors: Record<string, string> = {
-      Critical: "#DE350B",
-      High: "#FF991F",
-      Medium: "#0052CC",
-      Low: "#00875A",
-    };
+    const pColors: Record<string, string> = { Critical: "#EF4444", High: "#F59E0B", Medium: "#3B82F6", Low: "#10B981" };
+    const pLabels: Record<string, string> = { Critical: "Critica", High: "Alta", Medium: "Media", Low: "Baja" };
 
     return (
       <div className="flex flex-col h-full">
-        {/* Header */}
-        <div className="bg-white border-b border-[#DFE1E6] px-6 py-4 shrink-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[13px] font-medium text-[#172B4D]">
-              {boardTicket.key}
-            </span>
-            <span className="text-[#A5ADBA]">/</span>
-            <span className="text-[11px] text-[#6B778C]">
-              {boardTicket.issue_type}
-            </span>
-            <span className="text-[#A5ADBA]">/</span>
-            <span
-              className="text-[11px] font-semibold"
-              style={{ color: priorityColors[boardTicket.priority] || "#0052CC" }}
-            >
-              {boardTicket.priority}
+        <div className="bg-white border-b border-slate-200 px-6 py-4 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-slate-900">{boardTicket.key}</span>
+            <span className="text-slate-300">/</span>
+            <span className="text-xs text-slate-500">{boardTicket.issue_type}</span>
+            <span className="text-slate-300">/</span>
+            <span className="flex items-center gap-1 text-xs font-semibold" style={{ color: pColors[boardTicket.priority] || "#3B82F6" }}>
+              <IconPriority />
+              {pLabels[boardTicket.priority] || boardTicket.priority}
             </span>
           </div>
         </div>
-
-        {/* Pre-ingest content */}
-        <div className="flex-1 flex items-center justify-center px-6">
-          <div className="max-w-md text-center">
+        <div className="flex-1 flex items-center justify-center px-6 bg-slate-50/50">
+          <div className="max-w-lg text-center">
             {isIngesting ? (
-              /* Ingesting spinner */
-              <div>
-                <div className="w-16 h-16 mx-auto mb-4 border-4 border-[#DEEBFF] border-t-[#0052CC] rounded-full animate-spin" />
-                <p className="text-[15px] font-semibold text-[#172B4D] mb-2">
-                  Anonimizando incidencia...
-                </p>
-                <p className="text-[12px] text-[#6B778C]">
-                  Leyendo datos, anonimizando PII y creando copia segura en KOSIN
-                </p>
+              <div role="status">
+                <div className="w-16 h-16 mx-auto mb-5 border-[3px] border-primary/20 border-t-primary rounded-full animate-spin" />
+                <p className="text-base font-semibold text-slate-900 mb-2">Anonimizando incidencia...</p>
+                <p className="text-sm text-slate-500">Leyendo datos, detectando PII y creando copia segura</p>
               </div>
             ) : (
-              /* Confirm prompt */
               <div>
-                <div className="w-16 h-16 mx-auto mb-4 bg-[#FFFAE6] rounded-full flex items-center justify-center">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="#FF8B00">
-                    <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
-                  </svg>
+                <div className="w-16 h-16 mx-auto mb-5 bg-primary/10 rounded-2xl flex items-center justify-center border border-primary/20">
+                  <IconShieldCheck size={32} className="text-primary" />
                 </div>
-                <h3 className="text-[16px] font-semibold text-[#172B4D] mb-3">
-                  Incidencia pendiente de atender
-                </h3>
-
-                <div className="bg-[#F4F5F7] rounded-lg p-4 mb-4 text-left">
-                  <div className="text-[14px] font-semibold text-[#172B4D] mb-2">
-                    {boardTicket.key}
-                  </div>
-                  <div className="flex gap-4 text-[12px] text-[#6B778C]">
-                    <span>Tipo: <strong>{boardTicket.issue_type}</strong></span>
-                    <span>Prioridad: <strong className="ml-0.5" style={{ color: priorityColors[boardTicket.priority] || "#0052CC" }}>{boardTicket.priority}</strong></span>
-                  </div>
-                  <div className="flex gap-4 text-[12px] text-[#6B778C] mt-1">
-                    <span>Estado: <strong>{boardTicket.status}</strong></span>
+                <h2 className="text-lg font-bold text-slate-900 mb-3">Incidencia pendiente de atender</h2>
+                <div className="bg-white rounded-xl p-5 mb-5 text-left border border-slate-200 shadow-sm">
+                  <div className="text-sm font-bold text-slate-900 mb-3">{boardTicket.key}</div>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div><span className="text-slate-400">Tipo</span><p className="font-medium text-slate-800">{boardTicket.issue_type}</p></div>
+                    <div><span className="text-slate-400">Prioridad</span>
+                      <p className="font-semibold flex items-center gap-1" style={{ color: pColors[boardTicket.priority] || "#3B82F6" }}>
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: pColors[boardTicket.priority] }} />
+                        {pLabels[boardTicket.priority] || boardTicket.priority}
+                      </p>
+                    </div>
+                    <div><span className="text-slate-400">Estado</span><p className="font-medium text-slate-800">{boardTicket.status}</p></div>
                   </div>
                 </div>
-
-                <p className="text-[12px] text-[#6B778C] mb-4 leading-relaxed">
-                  Al confirmar se leera la incidencia completa, se anonimizaran los datos personales
-                  y se creara una copia anonimizada en KOSIN. Podras chatear con el agente IA
-                  para resolverla.
-                </p>
-
-                <button
-                  onClick={() => onConfirmIngest(boardTicket.key)}
-                  className="px-6 py-2.5 bg-[#0052CC] text-white rounded-lg text-[14px] font-semibold
-                             hover:bg-[#0747A6] active:scale-[0.98] transition-all duration-150
-                             shadow-sm hover:shadow-md"
-                >
+                <button onClick={() => onConfirmIngest(boardTicket.key)}
+                  className="px-8 py-3 bg-primary text-white rounded-xl text-sm font-bold hover:bg-blue-600 active:scale-[0.98] transition-all shadow-lg shadow-primary/20 inline-flex items-center gap-2">
+                  <IconShield size={18} className="text-white" />
                   Atender esta incidencia
                 </button>
               </div>
@@ -164,100 +179,75 @@ export function ChatPanel({
     );
   }
 
-  const priorityColors: Record<string, string> = {
-    critical: "#DE350B",
-    high: "#FF991F",
-    medium: "#0052CC",
-    low: "#00875A",
-  };
-
-  const statusLabels: Record<string, string> = {
-    open: "Pendiente",
-    in_progress: "En progreso",
-    resolved: "Resuelto",
-    closed: "Cerrado",
-  };
-
-  // Show thinking indicator when streaming but no content yet
+  const statusLabels: Record<string, string> = { open: "Pendiente", in_progress: "En Progreso", resolved: "Resuelto", closed: "Cerrado" };
+  const pLabels: Record<string, string> = { critical: "Critica", high: "Alta", medium: "Media", low: "Baja" };
+  const pColors: Record<string, string> = { critical: "#EF4444", high: "#F59E0B", medium: "#3B82F6", low: "#10B981" };
   const isThinking = isStreaming && !streamingContent;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Ticket detail header - Jira style */}
+      {/* Chat Header */}
       {ticket && (
-        <div className="bg-white border-b border-[#DFE1E6] px-6 py-4 shrink-0">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[13px] font-medium text-[#0052CC] hover:underline cursor-pointer">
-                  {ticket.kosin_id}
-                </span>
-                <span className="text-[#A5ADBA]">/</span>
-                <span className="text-[11px] text-[#6B778C] bg-[#DFE1E6] px-1.5 py-0.5 rounded-sm uppercase font-semibold">
-                  {statusLabels[ticket.status] || ticket.status}
-                </span>
-              </div>
-              <h2 className="text-[16px] font-semibold text-[#172B4D] leading-snug">
-                {ticket.summary}
-              </h2>
-            </div>
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
+          <div>
             <div className="flex items-center gap-2">
-              {/* Priority indicator */}
-              <span
-                className="w-3 h-3 rounded-sm"
-                style={{ backgroundColor: priorityColors[ticket.priority] || "#0052CC" }}
-                title={`Prioridad: ${ticket.priority}`}
-              />
+              <h2 className="text-lg font-bold text-slate-900">[ANON] {ticket.kosin_id}</h2>
+              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded uppercase">
+                {statusLabels[ticket.status] || ticket.status}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 mt-1">
+              <span className="flex items-center gap-1 text-xs text-slate-500">
+                <IconPriority />
+                Prioridad: <span className="font-semibold uppercase" style={{ color: pColors[ticket.priority] || "#3B82F6" }}>
+                  {pLabels[ticket.priority] || ticket.priority}
+                </span>
+              </span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Chat messages area */}
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        {messages.map((msg, idx) => (
-          <ChatMessage key={idx} message={msg} />
-        ))}
-
-        {/* Thinking indicator */}
-        {isThinking && (
-          <div className="flex justify-start mb-3">
-            <div className="w-8 h-8 rounded-full bg-[#0052CC] flex items-center justify-center shrink-0 mr-2 mt-1">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="white" className="animate-pulse">
-                <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7.001 7.001 0 0113 22h-2a7.001 7.001 0 01-6.93-6H3a1 1 0 110-2h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2z"/>
-              </svg>
+      {/* Chat messages */}
+      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-50/50" role="log" aria-label="Historial de chat" aria-live="polite">
+        {messages.length === 0 && !isThinking && !streamingContent && (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <IconChat size={48} className="text-slate-300 mx-auto mb-3" />
+              <p className="text-sm text-slate-400">Escribe un mensaje para comenzar</p>
             </div>
-            <div className="max-w-[75%] rounded-lg px-4 py-3 bg-white border border-[#DFE1E6] shadow-sm">
-              <div className="text-[11px] font-semibold mb-1 uppercase tracking-wide text-[#0052CC]">
-                Agente IA
-              </div>
-              <div className="flex items-center gap-1.5 py-1">
+          </div>
+        )}
+
+        {messages.map((msg, idx) => <ChatMessage key={idx} message={msg} />)}
+
+        {isThinking && (
+          <div className="flex gap-4 max-w-[85%] mb-6" role="status">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
+              <IconAgent className="text-primary" />
+            </div>
+            <div className="bg-white border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4">
+              <div className="flex items-center gap-2">
                 <div className="flex gap-1">
-                  <span className="w-2 h-2 bg-[#0052CC] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="w-2 h-2 bg-[#0052CC] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-2 h-2 bg-[#0052CC] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                 </div>
-                <span className="text-[12px] text-[#6B778C] ml-1.5">Analizando...</span>
+                <span className="text-xs text-slate-400">Analizando...</span>
               </div>
             </div>
           </div>
         )}
 
-        {/* Streaming content */}
         {streamingContent && (
-          <div className="flex justify-start mb-3">
-            <div className="w-8 h-8 rounded-full bg-[#0052CC] flex items-center justify-center shrink-0 mr-2 mt-1">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-                <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7.001 7.001 0 0113 22h-2a7.001 7.001 0 01-6.93-6H3a1 1 0 110-2h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2z"/>
-              </svg>
+          <div className="flex gap-4 max-w-[85%] mb-6">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
+              <IconAgent className="text-primary" />
             </div>
-            <div className="max-w-[75%] rounded-lg px-4 py-3 bg-white border border-[#DFE1E6] shadow-sm">
-              <div className="text-[11px] font-semibold mb-1 uppercase tracking-wide text-[#0052CC]">
-                Agente IA
-              </div>
-              <div className="text-[13px] whitespace-pre-wrap leading-relaxed text-[#172B4D]">
+            <div className="bg-white border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4">
+              <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
                 {streamingContent.replace(/\[CHIPS[:\s].*?\]/gs, "").replace(/\[CHIPS[:\s].*$/s, "").trim()}
-                <span className="inline-block w-1.5 h-4 bg-[#0052CC] animate-pulse ml-0.5 rounded-sm" />
+                <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 rounded-full" />
               </div>
             </div>
           </div>
@@ -268,21 +258,12 @@ export function ChatPanel({
 
       {/* Suggested action chips */}
       {suggestedChips.length > 0 && !isStreaming && (
-        <div className="px-6 py-2 bg-[#F4F5F7] border-t border-[#DFE1E6] shrink-0">
-          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+        <div className="px-6 pt-2 pb-0 bg-slate-50/50" role="group" aria-label="Acciones sugeridas">
+          <div className="flex flex-wrap gap-2">
             {suggestedChips.map((chip, i) => (
-              <button
-                key={i}
-                onClick={() => handleSend(chip, true)}
-                className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5
-                           text-[12px] font-medium text-[#0052CC] bg-[#DEEBFF] border border-[#B3D4FF]
-                           rounded-full hover:bg-[#B3D4FF] hover:border-[#4C9AFF]
-                           active:bg-[#4C9AFF] active:text-white active:scale-95
-                           transition-all duration-150 cursor-pointer whitespace-nowrap"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="opacity-60">
-                  <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>
-                </svg>
+              <button key={i} onClick={() => handleSend(chip, true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-full text-xs font-medium hover:border-primary hover:text-primary transition-all shadow-sm cursor-pointer">
+                <IconBolt />
                 {chip}
               </button>
             ))}
@@ -290,77 +271,77 @@ export function ChatPanel({
         </div>
       )}
 
-      {/* Input area - Jira comment style */}
-      <div className="bg-white border-t border-[#DFE1E6] px-6 py-4 shrink-0">
-        <div className="border border-[#DFE1E6] rounded-lg focus-within:ring-2 focus-within:ring-[#4C9AFF] focus-within:border-transparent overflow-hidden">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Escribe un mensaje al agente..."
-            disabled={isStreaming}
-            rows={2}
-            className="w-full px-4 py-3 text-[13px] text-[#172B4D] resize-none border-none
-                       focus:outline-none disabled:bg-[#F4F5F7] disabled:text-[#A5ADBA]
-                       placeholder:text-[#A5ADBA]"
-          />
-          <div className="flex items-center justify-between px-3 py-2 bg-[#F4F5F7] border-t border-[#DFE1E6]">
-            {/* Action buttons */}
-            <div className="flex gap-2">
-              {ticket && ticket.status !== "resolved" && ticket.status !== "closed" && (
-                <>
-                  <button
-                    onClick={() => {
-                      const agentMsgs = messages.filter((m) => m.role === "agent");
-                      const lastAgent = agentMsgs[agentMsgs.length - 1];
-                      if (!lastAgent) return;
-                      const comment = lastAgent.content.replace(/\[CHIPS[:\s].*?\]/gs, "").trim();
-                      if (!comment) return;
-                      setIsSyncing(true);
-                      onSyncToClient(comment);
-                      setTimeout(() => setIsSyncing(false), 2000);
-                    }}
-                    disabled={isSyncing}
-                    className="px-3 py-1.5 text-[12px] font-medium text-[#0052CC] bg-[#DEEBFF] rounded
-                               hover:bg-[#B3D4FF] disabled:opacity-50 transition-colors"
-                  >
-                    {isSyncing ? "Sincronizando..." : "Sincronizar con origen"}
-                  </button>
-                  <button
-                    onClick={onFinishTicket}
-                    className="px-3 py-1.5 text-[12px] font-medium text-[#00875A] bg-[#E3FCEF] rounded
-                               hover:bg-[#ABF5D1] transition-colors"
-                  >
-                    Finalizar ticket
-                  </button>
-                </>
-              )}
-              {ticket && ticket.status === "resolved" && (
-                <button
-                  onClick={onCloseTicket}
-                  className="px-3 py-1.5 text-[12px] font-medium text-[#DE350B] bg-[#FFEBE6] rounded
-                             hover:bg-[#FFBDAD] transition-colors"
-                >
-                  Cerrar ticket
-                </button>
-              )}
-            </div>
-            {/* Send button */}
-            <button
-              onClick={() => handleSend()}
-              disabled={isStreaming || !input.trim()}
-              className="px-4 py-1.5 bg-[#0052CC] text-white rounded text-[13px] font-medium
-                         hover:bg-[#0747A6] disabled:bg-[#A5ADBA] disabled:cursor-not-allowed
-                         transition-colors flex items-center gap-1.5"
-            >
-              <span>Enviar</span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-              </svg>
+      {/* Input area */}
+      <div className="p-6 border-t border-slate-200 bg-white">
+        <div className="relative mb-4">
+          <label htmlFor="chat-input" className="sr-only">Mensaje al agente IA</label>
+          <textarea id="chat-input" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
+            placeholder="Escribe tu mensaje..." disabled={isStreaming} rows={2}
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-14 text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all outline-none resize-none disabled:opacity-50 placeholder:text-slate-400" />
+          <button onClick={() => handleSend()} disabled={isStreaming || !input.trim()} aria-label="Enviar mensaje"
+            className="absolute right-3 bottom-3 w-8 h-8 bg-primary text-white rounded-lg flex items-center justify-center hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20 disabled:bg-slate-300 disabled:shadow-none disabled:cursor-not-allowed">
+            <IconSend />
+          </button>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex gap-2">
+            <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="Adjuntar archivo">
+              <IconClip />
             </button>
+          </div>
+          <div className="flex gap-3" role="group" aria-label="Acciones del ticket">
+            {ticket && ticket.status !== "resolved" && ticket.status !== "closed" && (
+              <>
+                <button
+                  onClick={() => {
+                    const agentMsgs = messages.filter((m) => m.role === "agent");
+                    const lastAgent = agentMsgs[agentMsgs.length - 1];
+                    if (!lastAgent) return;
+                    const comment = lastAgent.content.replace(/\[CHIPS[:\s].*?\]/gs, "").trim();
+                    if (!comment) return;
+                    setIsSyncing(true);
+                    onSyncToClient(comment);
+                    setTimeout(() => setIsSyncing(false), 2000);
+                  }}
+                  disabled={isSyncing}
+                  className="flex items-center gap-2 px-4 py-2 bg-teal-500 text-white rounded-lg text-sm font-bold hover:bg-teal-600 transition-colors shadow-lg shadow-teal-500/20 disabled:opacity-50">
+                  <IconSync />
+                  {isSyncing ? "Sincronizando..." : "Sincronizar con origen"}
+                </button>
+                <button onClick={() => setShowEscalation(true)}
+                  className="flex items-center gap-2 px-4 py-2 border-2 border-amber-500 text-amber-600 rounded-lg text-sm font-bold hover:bg-amber-500 hover:text-white transition-all">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
+                  Escalar
+                </button>
+                <button onClick={onFinishTicket}
+                  className="flex items-center gap-2 px-4 py-2 border-2 border-primary text-primary rounded-lg text-sm font-bold hover:bg-primary hover:text-white transition-all">
+                  Finalizar ticket
+                </button>
+              </>
+            )}
+            {ticket && ticket.status === "resolved" && (
+              <button onClick={onCloseTicket}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-bold hover:bg-red-600 transition-colors shadow-lg shadow-red-500/20">
+                <IconLock size={16} className="text-white" />
+                Cerrar ticket
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Escalation Modal */}
+      {ticket && (
+        <EscalationModal
+          ticketId={ticket.kosin_id}
+          open={showEscalation}
+          onClose={() => setShowEscalation(false)}
+          onConfirm={(data: EscalationData) => {
+            setShowEscalation(false);
+            onSendMessage(`[ESCALACION] Nivel: ${data.level}, Motivo: ${data.reason}${data.notes ? `, Notas: ${data.notes}` : ""}`);
+          }}
+        />
+      )}
     </div>
   );
 }

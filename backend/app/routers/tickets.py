@@ -184,7 +184,7 @@ async def ingest_confirm(kosin_key: str):
     if anon_comments_section:
         volcado_description += f"\n\n--- COMENTARIOS ANONIMIZADOS ---{anon_comments_section}"
 
-    kosin_id = await kosin.create_ticket(
+    kosin_id, create_error = await kosin.create_ticket(
         summary=f"[ANON] {anon_summary}",
         description=volcado_description,
         priority=priority,
@@ -192,7 +192,7 @@ async def ingest_confirm(kosin_key: str):
     )
 
     if not kosin_id:
-        raise HTTPException(status_code=500, detail="Error creando ticket anonimizado en KOSIN")
+        raise HTTPException(status_code=500, detail=f"Error creando ticket anonimizado en KOSIN: {create_error}")
 
     # 5. Save to local DB
     ticket_id = await db.create_ticket_mapping(

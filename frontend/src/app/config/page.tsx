@@ -46,13 +46,15 @@ const tabs: { id: Tab; label: string; icon: JSX.Element }[] = [
   { id: "tickets", label: "Tickets", icon: <IconDatabase /> },
 ];
 
-const piiRules = [
-  { id: "names", label: "Nombres y Apellidos", enabled: true, category: "Personal" },
-  { id: "emails", label: "Emails", enabled: true, category: "Personal" },
-  { id: "phones", label: "Telefonos", enabled: true, category: "Personal" },
-  { id: "ips", label: "Direcciones IP", enabled: true, category: "Tecnico" },
-  { id: "cards", label: "Numeros de Tarjeta/Cuenta", enabled: true, category: "Financiero" },
-  { id: "addresses", label: "Direcciones postales", enabled: false, category: "Personal" },
+const PII_RULES_META: { id: string; label: string; category: string }[] = [
+  { id: "names", label: "Nombres y Apellidos", category: "Personal" },
+  { id: "emails", label: "Emails", category: "Personal" },
+  { id: "phones", label: "Telefonos", category: "Personal" },
+  { id: "dni", label: "DNI / NIF / NIE", category: "Personal" },
+  { id: "ips", label: "Direcciones IP", category: "Tecnico" },
+  { id: "cards", label: "IBAN / Tarjetas", category: "Financiero" },
+  { id: "addresses", label: "Direcciones postales", category: "Personal" },
+  { id: "license_plates", label: "Matriculas", category: "Personal" },
 ];
 
 const priorityConfig: Record<string, { bg: string; text: string; label: string }> = {
@@ -105,11 +107,17 @@ function systemBgColor(name: string): string {
 
 export default function ConfigPage() {
   const [activeTab, setActiveTab] = useState<Tab>("integrations");
+
+  // Anonymization settings state (loaded from backend)
+  const [detectorType, setDetectorType] = useState("composite");
+  const [activeDetector, setActiveDetector] = useState("unknown");
+  const [presidioAvailable, setPresidioAvailable] = useState(false);
   const [substitutionTechnique, setSubstitutionTechnique] = useState("synthetic");
   const [sensitivity, setSensitivity] = useState(65);
-  const [piiStates, setPiiStates] = useState<Record<string, boolean>>(
-    Object.fromEntries(piiRules.map((r) => [r.id, r.enabled]))
-  );
+  const [piiStates, setPiiStates] = useState<Record<string, boolean>>({});
+  const [anonLoaded, setAnonLoaded] = useState(false);
+  const [anonSaving, setAnonSaving] = useState(false);
+  const [anonSaved, setAnonSaved] = useState(false);
 
   // Integrations state
   const [integrations, setIntegrations] = useState<IntegrationConfig[]>([]);
@@ -163,11 +171,30 @@ export default function ConfigPage() {
     }
   }, []);
 
+  const fetchAnonymization = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/config/anonymization`);
+      if (res.ok) {
+        const data = await res.json();
+        setDetectorType(data.detector_type || "composite");
+        setActiveDetector(data.active_detector || "unknown");
+        setPresidioAvailable(data.presidio_available || false);
+        setSensitivity(data.sensitivity ?? 65);
+        setSubstitutionTechnique(data.substitution_technique || "synthetic");
+        if (data.pii_rules) setPiiStates(data.pii_rules);
+        setAnonLoaded(true);
+      }
+    } catch (err) {
+      console.error("Failed to fetch anonymization settings:", err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchIntegrations();
     fetchGeneralSettings();
     fetchAdminTickets();
-  }, [fetchIntegrations, fetchGeneralSettings, fetchAdminTickets]);
+    fetchAnonymization();
+  }, [fetchIntegrations, fetchGeneralSettings, fetchAdminTickets, fetchAnonymization]);
 
   const handleExpand = (systemName: string) => {
     if (expandedSystem === systemName) {
@@ -269,6 +296,34 @@ export default function ConfigPage() {
     }
   };
 
+  const handleSaveAnonymization = async () => {
+    setAnonSaving(true);
+    setAnonSaved(false);
+    try {
+      const res = await fetch(`${API_URL}/api/config/anonymization`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          detector_type: detectorType,
+          sensitivity,
+          pii_rules: piiStates,
+          substitution_technique: substitutionTechnique,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.warning) console.warn("Anon save warning:", data.warning);
+        setAnonSaved(true);
+        setTimeout(() => setAnonSaved(false), 3000);
+        await fetchAnonymization();
+      }
+    } catch (err) {
+      console.error("Failed to save anonymization settings:", err);
+    } finally {
+      setAnonSaving(false);
+    }
+  };
+
   const sensitivityLabel = sensitivity < 35 ? "CONSERVADOR" : sensitivity < 70 ? "EQUILIBRADO" : "AGRESIVO";
   const sensitivityColor = sensitivity < 35 ? "text-green-600" : sensitivity < 70 ? "text-primary" : "text-red-500";
 
@@ -309,12 +364,69 @@ export default function ConfigPage() {
           <div className={activeTab === "tickets" ? "max-w-6xl" : "max-w-3xl"}>
             {activeTab === "anonymization" && (
               <div className="space-y-8">
+                {/* Detection Engine */}
+                <section>
+                  <h2 className="text-lg font-bold text-slate-900 mb-1">Motor de Deteccion</h2>
+                  <p className="text-sm text-slate-500 mb-4">Selecciona el motor que analiza texto en busca de datos personales (PII).</p>
+                  <div className="space-y-3">
+                    {[
+                      { id: "regex", title: "Solo Regex", desc: "Patrones regex para email, DNI, IBAN, IP, telefonos y nombres espanoles. Rapido, sin dependencias externas.", icon: "Rx" },
+                      { id: "presidio", title: "Microsoft Presidio (NLP)", desc: "Usa spaCy con modelo es_core_news_lg para deteccion NLP avanzada. Mejor con nombres, organizaciones y ubicaciones.", icon: "AI", requiresPresidio: true },
+                      { id: "composite", title: "Compuesto (Recomendado)", desc: "Combina Presidio + Regex. Presidio detecta entidades NLP, Regex cubre patrones estructurados. Mejor cobertura.", icon: "\u2726", requiresPresidio: true },
+                    ].map((opt) => (
+                      <label key={opt.id}
+                        className={`flex items-start gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
+                          detectorType === opt.id
+                            ? "border-primary bg-primary/5 shadow-sm"
+                            : opt.requiresPresidio && !presidioAvailable
+                              ? "border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed"
+                              : "border-slate-200 bg-white hover:border-slate-300"
+                        }`}>
+                        <div className={`mt-0.5 w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${
+                          detectorType === opt.id ? "bg-primary text-white" : "bg-slate-100 text-slate-500"
+                        }`}>
+                          {opt.icon}
+                        </div>
+                        <div className="flex-1">
+                          <input type="radio" name="detector" value={opt.id}
+                            checked={detectorType === opt.id}
+                            disabled={opt.requiresPresidio && !presidioAvailable}
+                            onChange={(e) => setDetectorType(e.target.value)} className="sr-only" />
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold text-slate-900">{opt.title}</p>
+                            {opt.requiresPresidio && !presidioAvailable && (
+                              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 text-amber-700 rounded">NO INSTALADO</span>
+                            )}
+                            {detectorType === opt.id && activeDetector === opt.id && (
+                              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-green-100 text-green-700 rounded">ACTIVO</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">{opt.desc}</p>
+                        </div>
+                        <div className={`mt-1 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                          detectorType === opt.id ? "border-primary bg-primary" : "border-slate-300"
+                        }`}>
+                          {detectorType === opt.id && <IconCheck />}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {!presidioAvailable && (
+                    <div className="mt-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="text-xs text-amber-800 font-medium">Presidio no esta instalado. Para habilitarlo:</p>
+                      <code className="block mt-1 text-[11px] text-amber-700 bg-amber-100/50 px-2 py-1 rounded font-mono">
+                        pip install presidio-analyzer &amp;&amp; python -m spacy download es_core_news_lg
+                      </code>
+                    </div>
+                  )}
+                </section>
+
                 {/* PII Rules */}
                 <section>
                   <h2 className="text-lg font-bold text-slate-900 mb-1">Reglas de PII</h2>
                   <p className="text-sm text-slate-500 mb-4">Configura que tipos de datos personales se detectan y anonimizan automaticamente.</p>
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                    {piiRules.map((rule) => (
+                    {PII_RULES_META.map((rule) => (
                       <div key={rule.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
                         <div className="flex items-center gap-3">
                           <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-500 rounded uppercase">{rule.category}</span>
@@ -338,7 +450,7 @@ export default function ConfigPage() {
                   <div className="space-y-3">
                     {[
                       { id: "redacted", title: "Redaccion total (REDACTED)", desc: "Reemplaza todos los datos con [REDACTED]. Mascarado estatico sin contexto." },
-                      { id: "synthetic", title: "Sustitucion sintetica ([PERSONA_1])", desc: "Mantiene coherencia del texto con datos ficticios realistas. Recomendado para soporte." },
+                      { id: "synthetic", title: "Sustitucion sintetica ([PERSONA_1])", desc: "Mantiene coherencia del texto con tokens tipo-entidad. Recomendado para soporte." },
                       { id: "aes256", title: "Cifrado reversible (AES-256)", desc: "Cifrado reversible con clave maestra. Permite recuperacion autorizada de datos originales." },
                     ].map((opt) => (
                       <label key={opt.id}
@@ -365,8 +477,8 @@ export default function ConfigPage() {
 
                 {/* AI Sensitivity */}
                 <section>
-                  <h2 className="text-lg font-bold text-slate-900 mb-1">Nivel de Sensibilidad IA</h2>
-                  <p className="text-sm text-slate-500 mb-4">Ajusta el umbral de deteccion de PII por el modelo de IA.</p>
+                  <h2 className="text-lg font-bold text-slate-900 mb-1">Nivel de Sensibilidad</h2>
+                  <p className="text-sm text-slate-500 mb-4">Ajusta el umbral de deteccion. Mayor sensibilidad = mas detecciones pero posibles falsos positivos.</p>
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-xs font-bold text-slate-400 uppercase">Conservador</span>
@@ -376,11 +488,29 @@ export default function ConfigPage() {
                     <input type="range" min="0" max="100" value={sensitivity} onChange={(e) => setSensitivity(Number(e.target.value))}
                       className="w-full h-2 bg-slate-200 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
                     <p className="text-xs text-slate-500 mt-3 leading-relaxed">
-                      Configuracion actual ({sensitivity}%) utiliza modelos transformadores avanzados para detectar PII en lenguaje natural
-                      con un umbral de confianza moderado, minimizando falsos positivos en contextos tecnicos.
+                      {detectorType === "presidio" || detectorType === "composite"
+                        ? `Con Presidio activo, el umbral de confianza del modelo NLP se ajusta al ${sensitivity}%. Valores altos detectan mas entidades pero pueden generar falsos positivos.`
+                        : `El motor Regex usa patrones deterministas. La sensibilidad afecta heuristicas de nombres (${sensitivity}% umbral de coincidencia).`
+                      }
                     </p>
                   </div>
                 </section>
+
+                {/* Save button */}
+                <div className="flex items-center justify-end gap-3">
+                  {anonSaved && (
+                    <span className="text-sm font-medium text-green-600 flex items-center gap-1">
+                      <IconCheck /> Guardado
+                    </span>
+                  )}
+                  <button
+                    onClick={handleSaveAnonymization}
+                    disabled={anonSaving}
+                    className="px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50"
+                  >
+                    {anonSaving ? "Guardando..." : "Guardar configuracion"}
+                  </button>
+                </div>
               </div>
             )}
 
