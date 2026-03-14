@@ -62,7 +62,10 @@ export function useWebSocket(clientId: string) {
               const quotePattern = /[""\u201C\u201D]([^""\u201C\u201D]+)[""\u201C\u201D]/g;
               let m: RegExpExecArray | null;
               while ((m = quotePattern.exec(chipsMatch[1])) !== null) {
-                chips.push(m[1]);
+                // Skip chips that contain redacted PII tokens
+                const chipText = m[1];
+                if (/\[[A-Z_]+REDACTED\]|\[[A-Z_]+_\d+\]/.test(chipText)) continue;
+                chips.push(chipText);
               }
               content = content.slice(0, content.indexOf(chipsMatch[0])).trim();
             }

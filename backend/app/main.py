@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import json
 import structlog
 
 from .config import settings
@@ -59,6 +60,64 @@ def _init_detector():
         return RegexDetector()
 
 
+async def _seed_default_configs(db):
+    """Seed system_config with defaults from .env if not already present."""
+    defaults = [
+        {
+            "system_name": "kosin",
+            "display_name": "KOSIN",
+            "system_type": "both",
+            "connector_type": "jira",
+            "base_url": settings.kosin_url,
+            "auth_token": settings.kosin_token,
+            "auth_email": "",
+            "project_key": settings.kosin_project,
+            "extra_config": json.dumps({
+                "issue_type_id": settings.kosin_issue_type_id,
+                "board_id": settings.kosin_board_id,
+                "parent_key": settings.kosin_parent_key,
+            }),
+            "is_active": 1,
+            "is_mock": int(settings.use_mock_jira),
+            "polling_interval_sec": 60,
+        },
+        {
+            "system_name": "remedy",
+            "display_name": "Remedy",
+            "system_type": "source",
+            "connector_type": "remedy",
+            "base_url": "",
+            "auth_token": "",
+            "auth_email": "",
+            "project_key": "",
+            "extra_config": "{}",
+            "is_active": int("remedy" in settings.active_sources),
+            "is_mock": 1,
+            "polling_interval_sec": 60,
+        },
+        {
+            "system_name": "servicenow",
+            "display_name": "ServiceNow",
+            "system_type": "source",
+            "connector_type": "servicenow",
+            "base_url": "",
+            "auth_token": "",
+            "auth_email": "",
+            "project_key": "",
+            "extra_config": "{}",
+            "is_active": int("servicenow" in settings.active_sources),
+            "is_mock": 1,
+            "polling_interval_sec": 60,
+        },
+    ]
+    for cfg in defaults:
+        existing = await db.get_system_config(cfg["system_name"])
+        if not existing:
+            name = cfg.pop("system_name")
+            await db.upsert_system_config(name, **cfg)
+            logger.info("seeded_system_config", system=name)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize services on startup, cleanup on shutdown."""
@@ -67,6 +126,7 @@ async def lifespan(app: FastAPI):
     # Database
     db = DatabaseService(settings.db_path)
     await db.init()
+    await _seed_default_configs(db)
     app_state["db"] = db
 
     # PII Detector
@@ -177,11 +237,12 @@ app.add_middleware(
 )
 
 # Include routers
-from .routers import tickets, chat, admin  # noqa: E402
+from .routers import tickets, chat, admin, config  # noqa: E402
 
 app.include_router(tickets.router)
 app.include_router(chat.router)
 app.include_router(admin.router)
+app.include_router(config.router)
 
 
 @app.get("/health")

@@ -1,10 +1,10 @@
 # Propuesta de Arquitectura: Plataforma de Anonimizacion de Ticketing
 
-**Version:** 1.3
+**Version:** 1.4
 **Fecha original:** 13 de Marzo de 2026
 **Ultima actualizacion:** 14 de Marzo de 2026
 **Equipo:** NTT DATA EMEAL
-**Estado:** Piloto implementado con Presidio NLP, multi-cliente (Remedy/ServiceNow), redaccion de imagenes y 56 tests — pendiente validacion (Fase 4)
+**Estado:** Piloto implementado con Presidio NLP, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional, renderizado Markdown en chat y 56 tests — pendiente validacion (Fase 4)
 
 ---
 
@@ -673,6 +673,28 @@ CREATE TABLE audit_log (
     details TEXT,                           -- descripcion de la accion (anonimizada)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Configuracion de integraciones (v1.4)
+CREATE TABLE system_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    system_name TEXT NOT NULL UNIQUE,       -- "kosin", "remedy", "servicenow"
+    display_name TEXT NOT NULL,
+    system_type TEXT NOT NULL DEFAULT 'source',  -- source, destination, both
+    connector_type TEXT NOT NULL DEFAULT 'jira',
+    base_url TEXT NOT NULL DEFAULT '',
+    auth_token TEXT NOT NULL DEFAULT '',    -- ⚠️ texto plano en POC (produccion: AES-256-GCM)
+    auth_email TEXT NOT NULL DEFAULT '',
+    project_key TEXT NOT NULL DEFAULT '',
+    extra_config TEXT NOT NULL DEFAULT '{}', -- JSON: issue_type_id, board_id, parent_key
+    is_active INTEGER NOT NULL DEFAULT 1,
+    is_mock INTEGER NOT NULL DEFAULT 1,
+    polling_interval_sec INTEGER NOT NULL DEFAULT 60,
+    last_connection_test TIMESTAMP,
+    last_connection_status TEXT,            -- "connected", "error"
+    last_connection_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
 ```
 
 **Diferencias con propuesta v1.0:**
@@ -680,6 +702,8 @@ CREATE TABLE audit_log (
   (denormalizacion para evitar consultar KOSIN en cada lectura)
 - `AUTOINCREMENT` explicito en primary keys
 - `operator_id` siempre vale `"operator"` (sin autenticacion real)
+- **v1.4:** Tabla `system_config` para gestionar integraciones desde la UI. Los valores por defecto
+  se copian desde `.env` al primer arranque (seed). Tokens enmascarados en la API (`****XXXX`)
 
 ---
 
@@ -836,6 +860,10 @@ como funcionalidad del sistema. No hay mecanismo automatico de bloqueo ni deriva
 - **Links KOSIN en chat:** Referencias a tickets PESESG-XXX se renderizan como enlaces clickeables
 - **Sin barra de estado** con "Tickets activos" y "Resueltos hoy" (no implementada)
 - **Tema visual:** Estilo Jira con header azul (#0052CC)
+- **v1.4:** Header compartido (`Header.tsx`) entre todas las paginas. Navegacion simplificada
+  a 2 secciones: Incidencias y Configuracion. Panel Admin integrado como tab "Tickets" dentro
+  de Configuracion. Mensajes del agente renderizados con Markdown (`react-markdown`). Chips
+  filtrados para excluir tokens PII redactados. Modal de confirmacion en lugar de `alert()` nativo
 
 ---
 
@@ -936,7 +964,9 @@ ticketing-anonymization/
 │       │
 │       ├── routers/                     # (propuesta: api/)
 │       │   ├── tickets.py               # REST: CRUD + ingest + board + sync-to-client + kosin-comment
-│       │   └── chat.py                  # WebSocket: streaming chat con agente
+│       │   ├── chat.py                  # WebSocket: streaming chat con agente
+│       │   ├── admin.py                 # Admin: listar/eliminar tickets ingestados
+│       │   └── config.py               # Config API: integraciones CRUD + test conexion + general settings
 │       │
 │       ├── services/
 │       │   ├── anonymizer.py            # Anonymizer: mapa sustitucion + AES-256-GCM + filtro + de_anonymize
@@ -979,10 +1009,13 @@ ticketing-anonymization/
         ├── app/
         │   ├── layout.tsx               # Root layout (lang="es")
         │   ├── page.tsx                 # SPA: orquestacion + sync-to-client + close ticket
+        │   ├── config/page.tsx          # Configuracion: General, Anonimizacion, Integraciones, Tickets
+        │   ├── admin/page.tsx           # Redirige a /config (funcionalidad integrada)
         │   └── globals.css
         ├── components/
+        │   ├── Header.tsx               # Header compartido: logo, nav, usuario, sub-header
         │   ├── ChatPanel.tsx            # Chat + chips + botones Sincronizar/Cerrar
-        │   ├── ChatMessage.tsx          # Burbuja de mensaje + links KOSIN
+        │   ├── ChatMessage.tsx          # Burbuja de mensaje + Markdown (react-markdown) + links KOSIN
         │   ├── TicketList.tsx           # Panel izquierdo: pendientes + en atencion
         │   └── TicketCard.tsx           # Tarjeta de ticket ingestado
         ├── hooks/

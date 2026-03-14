@@ -48,6 +48,27 @@ CREATE TABLE IF NOT EXISTS audit_log (
     details TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS system_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    system_name TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    system_type TEXT NOT NULL DEFAULT 'source',
+    connector_type TEXT NOT NULL DEFAULT 'jira',
+    base_url TEXT NOT NULL DEFAULT '',
+    auth_token TEXT NOT NULL DEFAULT '',
+    auth_email TEXT NOT NULL DEFAULT '',
+    project_key TEXT NOT NULL DEFAULT '',
+    extra_config TEXT NOT NULL DEFAULT '{}',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    is_mock INTEGER NOT NULL DEFAULT 1,
+    polling_interval_sec INTEGER NOT NULL DEFAULT 60,
+    last_connection_test TIMESTAMP,
+    last_connection_status TEXT,
+    last_connection_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
 """
 
 
@@ -223,3 +244,52 @@ class DatabaseService:
                 (ticket_mapping_id,)
             )
         return await self.fetchall("SELECT * FROM audit_log ORDER BY created_at DESC")
+
+    # --- System Config ---
+
+    async def get_all_system_configs(self) -> List[dict]:
+        return await self.fetchall(
+            "SELECT * FROM system_config ORDER BY system_name"
+        )
+
+    async def get_system_config(self, name: str) -> Optional[dict]:
+        return await self.fetchone(
+            "SELECT * FROM system_config WHERE system_name = ?", (name,)
+        )
+
+    async def upsert_system_config(self, name: str, **fields) -> None:
+        existing = await self.get_system_config(name)
+        if existing:
+            sets = []
+            vals = []
+            for k, v in fields.items():
+                if v is not None:
+                    sets.append(f"{k} = ?")
+                    vals.append(v)
+            if not sets:
+                return
+            sets.append("updated_at = ?")
+            vals.append(datetime.utcnow().isoformat())
+            vals.append(name)
+            await self.execute(
+                f"UPDATE system_config SET {', '.join(sets)} WHERE system_name = ?",
+                tuple(vals)
+            )
+        else:
+            cols = ["system_name"]
+            vals = [name]
+            for k, v in fields.items():
+                if v is not None:
+                    cols.append(k)
+                    vals.append(v)
+            placeholders = ", ".join(["?"] * len(cols))
+            await self.execute(
+                f"INSERT INTO system_config ({', '.join(cols)}) VALUES ({placeholders})",
+                tuple(vals)
+            )
+
+    async def update_connection_status(self, name: str, status: str, error: Optional[str] = None) -> None:
+        await self.execute(
+            "UPDATE system_config SET last_connection_test = ?, last_connection_status = ?, last_connection_error = ? WHERE system_name = ?",
+            (datetime.utcnow().isoformat(), status, error, name)
+        )
