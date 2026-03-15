@@ -220,7 +220,7 @@ export default function Home() {
     : null;
 
   return (
-    <div className="bg-[#F8FAFC] dark:bg-gray-900 text-slate-900 dark:text-gray-100 min-h-screen flex flex-col overflow-hidden">
+    <div className="bg-[#F8FAFC] dark:bg-gray-900 text-slate-900 dark:text-gray-100 h-screen flex flex-col overflow-hidden">
       <Header
         activePage="incidencias"
         isConnected={isConnected}
@@ -249,7 +249,7 @@ export default function Home() {
       />
 
       {/* Main Content */}
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex min-h-0 overflow-hidden">
         <aside className="w-[30%] bg-navy-deep dark:bg-gray-950 flex flex-col border-r border-slate-800 dark:border-gray-700 overflow-y-auto custom-scrollbar" aria-label="Lista de incidencias">
           <TicketList
             boardTickets={boardTickets} tickets={tickets}
