@@ -1,10 +1,10 @@
 # Propuesta de Arquitectura: Plataforma de Anonimizacion de Ticketing
 
-**Version:** 1.5
+**Version:** 1.6
 **Fecha original:** 13 de Marzo de 2026
-**Ultima actualizacion:** 14 de Marzo de 2026
+**Ultima actualizacion:** 15 de Marzo de 2026
 **Equipo:** NTT DATA EMEAL
-**Estado:** Piloto implementado con Presidio NLP configurable desde UI, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional (integraciones + anonimizacion + admin tickets), renderizado Markdown en chat, notificaciones toast/modal y 56 tests — pendiente validacion (Fase 4)
+**Estado:** Piloto implementado con Presidio NLP configurable desde UI, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional (integraciones + anonimizacion + admin tickets), renderizado Markdown en chat, notificaciones toast/modal, soporte tri-provider LLM (Ollama/OpenAI/Azure), test de conexion LLM desde UI, guia de despliegue Azure completa y 56 tests — pendiente validacion (Fase 4)
 
 ---
 
@@ -183,7 +183,7 @@ mediante herramientas controladas y auditadas.
 | Orquestador | `services/orchestrator.py` dedicado | Logica distribuida en `routers/tickets.py` |
 | Ingesta | Automatica (webhook/polling) | Manual: operador confirma desde el board |
 | Frontend | React + TypeScript | Next.js 14 App Router + TypeScript |
-| LLM | Solo Azure OpenAI | Configurable: Ollama (dev) / Azure (prod) |
+| LLM | Solo Azure OpenAI | Configurable: Ollama (dev) / OpenAI (API directa) / Azure (prod) |
 | Conector Jira | Libreria `jira` (Atlassian) | `httpx` directo contra Jira REST API v2 |
 | Memory agente | `ConversationBufferMemory` (LangChain) | Historial manual cargado desde SQLite |
 | Modelos datos | 3 archivos (`database.py`, `ticket.py`, `chat.py`) | 1 archivo `schemas.py` (Pydantic) |
@@ -441,9 +441,12 @@ el filtro final bloquea fugas residuales.
 
 **Modelo LLM (implementado):** Configurable via `LLM_PROVIDER`:
 - `ollama` (por defecto para desarrollo): Ollama local con modelo configurable (`OLLAMA_MODEL`)
+- `openai` (API directa): OpenAI con modelo configurable (`OPENAI_MODEL`, por defecto `gpt-4o-mini`). API key configurable desde UI o `.env`
 - `azure` (para produccion): Azure OpenAI en instancia privada con compliance GDPR
 
-**Framework:** LangChain con `ChatOllama` o `AzureChatOpenAI` segun configuracion.
+**Framework:** LangChain con `ChatOllama`, `ChatOpenAI` o `AzureChatOpenAI` segun configuracion.
+
+**Test de conexion (implementado):** Endpoint `POST /api/config/agent/test-connection` permite verificar la conectividad con cualquier proveedor LLM desde la UI de configuracion antes de guardar cambios. Tambien se puede actualizar la API key en runtime via `PUT /api/config/agent/api-key`.
 
 ### 4.2 Anonymizer (Simplificado para Piloto)
 
@@ -719,13 +722,13 @@ CREATE TABLE system_config (
 | Frontend | **Next.js 14** (App Router) + TypeScript + Tailwind CSS + Zustand | SPA con streaming WebSocket. Cambio vs propuesta: Next.js en lugar de React puro |
 | Backend | Python 3.11+ / FastAPI | Async nativo, ideal para streaming LLM, tipado |
 | Base de datos | SQLite (aiosqlite) | Sin infraestructura adicional, suficiente para piloto |
-| Agente IA | LangChain + **Ollama (dev) / AzureChatOpenAI (prod)** | Cambio vs propuesta: soporte dual para desarrollo local sin Azure |
+| Agente IA | LangChain + **Ollama (dev) / ChatOpenAI (API directa) / AzureChatOpenAI (prod)** | Cambio vs propuesta: soporte tri-provider para desarrollo local, API directa y produccion Azure |
 | Deteccion PII | **CompositeDetector** (Presidio NLP + RegexDetector) | NER español + regex estructurado. Configurable via UI `/config` o `PII_DETECTOR` env |
 | Redaccion imagenes | **Presidio Image Redactor** + Tesseract OCR | PII detectada y tapada directamente en imagenes adjuntas |
 | Conectores | **httpx** (REST directo) | Cambio vs propuesta: no se usa libreria `jira` de Atlassian |
 | Comunicacion | REST (fetch) + WebSocket (nativo) | WebSocket para streaming de tokens del agente |
 | Logging | structlog | Logging estructurado (no previsto en propuesta) |
-| Despliegue | **Manual** (uvicorn + npm run dev) | ⚠️ Docker Compose planificado pero no creado |
+| Despliegue | **Manual** (uvicorn + npm run dev) | ✅ Guia completa de despliegue Azure documentada (`docs/DEPLOYMENT_AZURE.md`) |
 
 ### 5.2 Evolucion a Produccion (Futuro)
 
@@ -735,7 +738,7 @@ CREATE TABLE system_config (
 | Autenticacion | Sin auth (operator_id hardcoded) | SSO/OAuth2 corporativo |
 | Adjuntos | ✅ OCR + PDF + Office (AttachmentProcessor) | Tesseract en servidor, validacion formatos |
 | Conectores | ✅ **ConnectorRouter** multi-source (KOSIN + Remedy + ServiceNow mocks) | Conectores reales para Remedy/ServiceNow + MCP |
-| Despliegue | Manual (uvicorn + npm) | Docker Compose → Kubernetes / Azure Container Apps |
+| Despliegue | Manual (uvicorn + npm) | ✅ Guia Azure documentada → Azure Container Apps + Static Web Apps |
 | Escalado | Monolito | Microservicios si volumen lo requiere |
 | Cache | Ninguna | Redis para sesiones y cache LLM |
 | Deteccion PII | ✅ **CompositeDetector** (Presidio + Regex) | + AXET como implementacion adicional |
@@ -759,6 +762,7 @@ CREATE TABLE system_config (
 ### 6.2 Residencia de Datos
 
 - **LLM (dev):** Ollama local — datos no salen de la maquina del desarrollador.
+- **LLM (API directa):** OpenAI API — util para pruebas rapidas sin infraestructura local. Datos salen a servidores OpenAI (no recomendado para PII real en produccion).
 - **LLM (prod):** Azure OpenAI en instancia privada con compliance GDPR.
 - **Plataforma:** Desplegable en la misma region que los datos de cliente.
 - **Logs y trazas:** structlog para logging estructurado. No se almacenan payloads con PII en claro.
@@ -1105,11 +1109,28 @@ forward-looking. Actualmente los mocks (Remedy, ServiceNow) heredan directamente
 `TicketConnector`, pero cuando haya servidores MCP reales, heredaran de `MCPConnector`
 y usaran `call_tool()` para comunicarse via Model Context Protocol.
 
-### 11.2 Evolucion Post-Piloto
+### 11.2 Guia de Despliegue Azure
+
+Se ha creado una guia completa de despliegue en Azure: **[`docs/DEPLOYMENT_AZURE.md`](docs/DEPLOYMENT_AZURE.md)**
+
+Contenido de la guia:
+- Arquitectura de despliegue (Azure Container Apps + Static Web Apps + VNET)
+- Dockerfiles para backend (con Tesseract OCR + spaCy) y frontend (Next.js standalone)
+- Migracion de SQLite a MySQL o PostgreSQL (ambas opciones documentadas con esquemas y drivers)
+- Azure Key Vault para gestion de secretos (ENCRYPTION_KEY, KOSIN_TOKEN, API keys)
+- Azure OpenAI Service: creacion de recurso y despliegue de modelo
+- Networking: VNET, Private Endpoints, CORS, HTTPS con dominio custom
+- CI/CD con GitHub Actions (build + deploy automatico)
+- Monitorizacion con Application Insights y alertas recomendadas
+- Estimacion de costes (~155-225 EUR/mes para 5 operadores)
+- Checklist de despliegue completo (pre-despliegue, infra, app, verificacion, seguridad)
+- Notas GDPR: residencia de datos EU, cifrado en reposo/transito, derecho al olvido
+
+### 11.3 Evolucion Post-Piloto
 
 Prioridades inmediatas (deuda tecnica del piloto):
 - **Autenticacion:** JWT basico o SSO para identificar operadores reales
-- **Docker:** Crear Dockerfile + docker-compose.yml para despliegue reproducible
+- ~~**Docker:** Crear Dockerfile + docker-compose.yml para despliegue reproducible~~ ✅ Documentado en guia de despliegue Azure (`docs/DEPLOYMENT_AZURE.md`)
 - ~~**IPv6 y ubicaciones:** Ampliar regex del RegexDetector~~ ✅ Implementado (IPv6, direcciones, CP, matriculas + Presidio NLP)
 
 Mejoras funcionales:
@@ -1120,12 +1141,13 @@ Mejoras funcionales:
 - ~~**Deteccion avanzada:** Nuevas implementaciones DetectionService (AXET/Presidio)~~ ✅ PresidioDetector + CompositeDetector + Image Redactor
 - **Escalado onshore:** Mecanismo automatico de bloqueo y derivacion
 
-### 11.3 Dependencias Externas
+### 11.4 Dependencias Externas
 
 | Dependencia | Estado | Responsable |
 |---|---|---|
 | Endpoint AXET (futuro, opcional) | No requerido para piloto | Equipo plataforma |
 | Instancia Azure OpenAI privada | Existente (no usada aun en piloto) | Equipo infra/cloud |
+| OpenAI API (directa) | ✅ Soportada como proveedor alternativo | Desarrollador / equipo |
 | KOSIN (Jira interno) | ✅ En uso (source + dest en POC) | Equipo operaciones |
 | Ollama (LLM local) | ✅ En uso para desarrollo | Desarrollador local |
 | Acceso API al Jira cliente piloto | Por gestionar (para salir de modo POC) | Equipo proyecto piloto |
@@ -1141,23 +1163,25 @@ El operador puede visualizar tickets del board KOSIN, ingestarlos manualmente co
 trabajar con el agente IA via chat con streaming, y ejecutar acciones tecnicas simuladas —
 todo sin ver datos personales en ningun momento.
 
-La implementacion se apoya en **LangChain + Ollama** (desarrollo) / **Azure OpenAI** (produccion),
+La implementacion se apoya en **LangChain** con soporte tri-provider: **Ollama** (desarrollo local), **OpenAI API directa** (pruebas rapidas) y **Azure OpenAI** (produccion GDPR),
 junto con un **Anonymizer** con regex pre-LLM, un filtro post-LLM con deteccion de PII desconocido,
 KOSIN como repositorio interno anonimizado, y un catalogo cerrado de acciones tecnicas.
 
 **Principales mejoras respecto a la propuesta original:**
 - Ingesta manual con confirmacion del operador (mas control que la ingesta automatica)
 - Chips de accion sugerida (UX significativamente mejorada)
-- Soporte dual LLM (Ollama + Azure) para desarrollo agil
+- Soporte tri-provider LLM (Ollama + OpenAI + Azure) con test de conexion desde UI
 - Filtro post-LLM mejorado con deteccion de PII desconocido (`[TYPE_REDACTED]`)
 - **Presidio NLP** (v1.3): deteccion de nombres, organizaciones y ubicaciones no capturables por regex
 - **Presidio Image Redactor** (v1.3): redaccion de PII directamente en imagenes adjuntas
 - **Multi-cliente** (v1.3): ConnectorRouter con Remedy y ServiceNow (mocks), MCPConnector base
 - **56 tests** (v1.3): cobertura completa de deteccion, anonimizacion, redaccion de imagenes y conectores
 
+- **Guia de despliegue Azure** (v1.6): documentacion completa para produccion (`docs/DEPLOYMENT_AZURE.md`)
+
 **Principales elementos pendientes:**
 - Autenticacion de operadores (JWT/SSO)
-- Docker Compose y Dockerfiles
+- Ejecucion real de los Dockerfiles documentados
 - Escalado automatico a onshore
 - Conectores reales Remedy/ServiceNow (actualmente mocks funcionales)
 
