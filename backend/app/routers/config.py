@@ -46,7 +46,9 @@ async def list_integrations():
     if not db:
         raise HTTPException(status_code=503, detail="Database not ready")
     rows = await db.get_all_system_configs()
-    return [_serialize_config(row) for row in rows]
+    # Filter out internal config entries (not real integrations)
+    internal = {"anonymization", "agent", "general"}
+    return [_serialize_config(row) for row in rows if row.get("system_name") not in internal]
 
 
 @router.get("/integrations/{name}")
