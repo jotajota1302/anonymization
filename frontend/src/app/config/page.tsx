@@ -328,7 +328,7 @@ export default function ConfigPage() {
   const sensitivityColor = sensitivity < 35 ? "text-green-600" : sensitivity < 70 ? "text-primary" : "text-red-500";
 
   return (
-    <div className="bg-[#F8FAFC] text-slate-900 min-h-screen flex flex-col">
+    <div className="bg-[#F8FAFC] text-slate-900 h-screen flex flex-col overflow-hidden">
       <Header
         activePage="config"
         subheader={
@@ -341,7 +341,7 @@ export default function ConfigPage() {
       />
 
       {/* Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0">
         {/* Sidebar */}
         <aside className="w-64 bg-white border-r border-slate-200 p-4 shrink-0">
           <div className="space-y-1">
