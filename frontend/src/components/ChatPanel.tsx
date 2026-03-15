@@ -93,7 +93,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
   // Empty state
   if (!ticketId && !boardTicket) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-slate-50/50 dark:bg-gray-900">
+      <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden bg-slate-50/50 dark:bg-gray-900">
         <div className="text-center max-w-md">
           <div className="w-20 h-20 mx-auto mb-6 bg-primary/5 rounded-2xl flex items-center justify-center border border-primary/10">
             <IconShield size={36} className="text-primary" />

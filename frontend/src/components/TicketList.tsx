@@ -28,7 +28,7 @@ export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBo
   const activeTickets = tickets.filter((t) => t.status !== "closed");
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
       {/* PENDIENTES */}
       <div className="p-4 border-b border-slate-800/50">
         <div className="flex items-center justify-between mb-4">
