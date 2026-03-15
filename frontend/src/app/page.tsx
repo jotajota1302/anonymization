@@ -257,7 +257,7 @@ export default function Home() {
             onSelectTicket={handleSelectTicket} onSelectBoardTicket={handleSelectBoardTicket}
           />
         </aside>
-        <section id="main-content" className="flex-1 flex flex-col bg-white dark:bg-gray-900">
+        <section id="main-content" className="flex-1 flex flex-col min-h-0 bg-white dark:bg-gray-900">
           <ChatPanel
             ticketId={selectedTicketId} boardTicket={selectedBoardTicket}
             onSendMessage={handleSendMessage} onFinishTicket={handleFinishTicket}

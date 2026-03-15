@@ -124,7 +124,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
     const pLabels: Record<string, string> = { Critical: "Critica", High: "Alta", Medium: "Media", Low: "Baja" };
 
     return (
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full min-h-0">
         <div className="bg-white dark:bg-gray-800 border-b border-slate-200 dark:border-gray-700 px-6 py-4 shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-slate-900 dark:text-gray-100">{boardTicket.key}</span>
@@ -183,7 +183,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
   const isThinking = isStreaming && !streamingContent;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Chat Header */}
       {ticket && (
         <div className="px-6 py-4 border-b border-slate-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800">
@@ -256,7 +256,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
 
       {/* Suggested action chips */}
       {suggestedChips.length > 0 && !isStreaming && (
-        <div className="px-6 pt-2 pb-0 bg-slate-50/50 dark:bg-gray-900" role="group" aria-label="Acciones sugeridas">
+        <div className="px-6 py-3 bg-slate-50/50 dark:bg-gray-900 border-t border-slate-100 dark:border-gray-800" role="group" aria-label="Acciones sugeridas">
           <div className="flex flex-wrap gap-2">
             {suggestedChips.map((chip, i) => (
               <button key={i} onClick={() => handleSend(chip, true)}
