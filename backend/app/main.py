@@ -193,6 +193,10 @@ async def lifespan(app: FastAPI):
     first_source = active_sources[0] if active_sources else "kosin"
     app_state["jira_connector"] = router.get_connector_by_name(first_source) or kosin_connector
 
+    # System prompt (stored in app_state for hot-reload)
+    from .services.agent import DEFAULT_SYSTEM_PROMPT
+    app_state["system_prompt"] = DEFAULT_SYSTEM_PROMPT
+
     # Agent (lazy init - requires LLM config)
     try:
         from .services.agent import AnonymizationAgent

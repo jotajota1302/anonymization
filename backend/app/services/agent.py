@@ -19,7 +19,7 @@ from ..tools.read_attachment import read_attachment
 
 logger = structlog.get_logger()
 
-SYSTEM_PROMPT = """# ROL
+DEFAULT_SYSTEM_PROMPT = """# ROL
 Eres el **Agente de Anonimizacion** de la Plataforma de Ticketing GDPR de NTT DATA EMEAL. \
 Actuas como intermediario entre los datos reales de incidencias (que contienen PII) y los \
 operadores offshore que las resuelven. Tu funcion es ayudar al operador a entender, \
@@ -204,39 +204,56 @@ class AnonymizationAgent:
         self.llm = self._create_llm()
         logger.info("llm_initialized", provider=settings.llm_provider)
 
-        # Tools
-        self.tools = [read_ticket, update_kosin, create_kosin_ticket, execute_action, read_attachment]
+        # Tools — keep all_tools for toggling, tools for active set
+        self.all_tools = [read_ticket, update_kosin, create_kosin_ticket, execute_action, read_attachment]
+        self.tools = list(self.all_tools)
 
     @staticmethod
-    def _create_llm():
+    def _create_llm(provider: str = None, model: str = None, temperature: float = None, **kwargs):
         """Create LLM instance based on configured provider."""
-        provider = settings.llm_provider.lower()
+        provider = (provider or settings.llm_provider).lower()
+        temperature = temperature if temperature is not None else 0.3
 
         if provider == "ollama":
             from langchain_ollama import ChatOllama
             return ChatOllama(
-                base_url=settings.ollama_base_url,
-                model=settings.ollama_model,
-                temperature=0.3,
+                base_url=kwargs.get("ollama_base_url", settings.ollama_base_url),
+                model=model or settings.ollama_model,
+                temperature=temperature,
             )
         elif provider == "azure":
             from langchain_openai import AzureChatOpenAI
             return AzureChatOpenAI(
-                azure_endpoint=settings.azure_openai_endpoint,
-                azure_deployment=settings.azure_openai_deployment,
-                api_key=settings.azure_openai_key,
-                api_version=settings.azure_openai_api_version,
-                temperature=0.3,
+                azure_endpoint=kwargs.get("azure_endpoint", settings.azure_openai_endpoint),
+                azure_deployment=kwargs.get("azure_deployment", model or settings.azure_openai_deployment),
+                api_key=kwargs.get("azure_api_key", settings.azure_openai_key),
+                api_version=kwargs.get("azure_api_version", settings.azure_openai_api_version),
+                temperature=temperature,
                 streaming=True,
             )
         else:
             raise ValueError(f"Unknown LLM provider: {provider}. Use 'ollama' or 'azure'")
 
+    def update_llm(self, provider: str, model: str, temperature: float = 0.3, **kwargs):
+        """Hot-reload: recreate the LLM instance with new config."""
+        self.llm = self._create_llm(provider=provider, model=model, temperature=temperature, **kwargs)
+        logger.info("llm_hot_reloaded", provider=provider, model=model, temperature=temperature)
+
+    def set_active_tools(self, tool_states: Dict[str, bool]):
+        """Hot-reload: filter active tools based on name→enabled mapping."""
+        self.tools = [t for t in self.all_tools if tool_states.get(t.name, True)]
+        logger.info("tools_hot_reloaded", active=[t.name for t in self.tools])
+
+    def _get_system_prompt(self) -> str:
+        """Get current system prompt from app_state or fallback to default."""
+        from ..main import app_state
+        return app_state.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
+
     def _build_messages(
         self, chat_history: List[Dict], user_message: str
     ) -> List:
         """Build message list from chat history and new message."""
-        messages = [SystemMessage(content=SYSTEM_PROMPT)]
+        messages = [SystemMessage(content=self._get_system_prompt())]
 
         for msg in chat_history:
             if msg["role"] == "operator":
@@ -381,7 +398,7 @@ class AnonymizationAgent:
         )
 
         # Build messages with history context
-        messages = [SystemMessage(content=SYSTEM_PROMPT)]
+        messages = [SystemMessage(content=self._get_system_prompt())]
         for msg in history:
             if msg["role"] == "operator":
                 messages.append(HumanMessage(content=msg["message"]))

@@ -95,23 +95,23 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
   // Empty state
   if (!ticketId && !boardTicket) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-slate-50/50">
+      <div className="flex-1 flex items-center justify-center bg-slate-50/50 dark:bg-gray-900">
         <div className="text-center max-w-md">
           <div className="w-20 h-20 mx-auto mb-6 bg-primary/5 rounded-2xl flex items-center justify-center border border-primary/10">
             <IconShield size={36} className="text-primary" />
           </div>
-          <h2 className="text-lg font-bold text-slate-900 mb-2">Plataforma de Anonimizacion</h2>
-          <p className="text-sm text-slate-500 mb-8">Selecciona una incidencia del panel izquierdo para comenzar a trabajar de forma segura</p>
+          <h2 className="text-lg font-bold text-slate-900 dark:text-gray-100 mb-2">Plataforma de Anonimizacion</h2>
+          <p className="text-sm text-slate-500 dark:text-gray-400 mb-8">Selecciona una incidencia del panel izquierdo para comenzar a trabajar de forma segura</p>
           <div className="grid grid-cols-3 gap-3">
             {[
               { icon: <IconShield size={18} className="text-primary" />, title: "Anonimizacion", desc: "Datos protegidos" },
               { icon: <IconChat size={18} className="text-primary" />, title: "Asistente IA", desc: "Guia inteligente" },
               { icon: <IconLock size={18} className="text-primary" />, title: "Cifrado AES-256", desc: "Extremo a extremo" },
             ].map((f, i) => (
-              <div key={i} className="p-4 rounded-xl bg-white border border-slate-200 shadow-sm text-center">
+              <div key={i} className="p-4 rounded-xl bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700 shadow-sm text-center">
                 <div className="w-10 h-10 mx-auto mb-2 bg-primary/10 rounded-lg flex items-center justify-center">{f.icon}</div>
-                <p className="text-xs font-semibold text-slate-900 mb-0.5">{f.title}</p>
-                <p className="text-[10px] text-slate-500">{f.desc}</p>
+                <p className="text-xs font-semibold text-slate-900 dark:text-gray-100 mb-0.5">{f.title}</p>
+                <p className="text-[10px] text-slate-500 dark:text-gray-400">{f.desc}</p>
               </div>
             ))}
           </div>
@@ -127,43 +127,43 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
 
     return (
       <div className="flex flex-col h-full">
-        <div className="bg-white border-b border-slate-200 px-6 py-4 shrink-0">
+        <div className="bg-white dark:bg-gray-800 border-b border-slate-200 dark:border-gray-700 px-6 py-4 shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-900">{boardTicket.key}</span>
-            <span className="text-slate-300">/</span>
-            <span className="text-xs text-slate-500">{boardTicket.issue_type}</span>
-            <span className="text-slate-300">/</span>
+            <span className="text-sm font-semibold text-slate-900 dark:text-gray-100">{boardTicket.key}</span>
+            <span className="text-slate-300 dark:text-gray-600">/</span>
+            <span className="text-xs text-slate-500 dark:text-gray-400">{boardTicket.issue_type}</span>
+            <span className="text-slate-300 dark:text-gray-600">/</span>
             <span className="flex items-center gap-1 text-xs font-semibold" style={{ color: pColors[boardTicket.priority] || "#3B82F6" }}>
               <IconPriority />
               {pLabels[boardTicket.priority] || boardTicket.priority}
             </span>
           </div>
         </div>
-        <div className="flex-1 flex items-center justify-center px-6 bg-slate-50/50">
+        <div className="flex-1 flex items-center justify-center px-6 bg-slate-50/50 dark:bg-gray-900">
           <div className="max-w-lg text-center">
             {isIngesting ? (
               <div role="status">
                 <div className="w-16 h-16 mx-auto mb-5 border-[3px] border-primary/20 border-t-primary rounded-full animate-spin" />
-                <p className="text-base font-semibold text-slate-900 mb-2">Anonimizando incidencia...</p>
-                <p className="text-sm text-slate-500">Leyendo datos, detectando PII y creando copia segura</p>
+                <p className="text-base font-semibold text-slate-900 dark:text-gray-100 mb-2">Anonimizando incidencia...</p>
+                <p className="text-sm text-slate-500 dark:text-gray-400">Leyendo datos, detectando PII y creando copia segura</p>
               </div>
             ) : (
               <div>
                 <div className="w-16 h-16 mx-auto mb-5 bg-primary/10 rounded-2xl flex items-center justify-center border border-primary/20">
                   <IconShieldCheck size={32} className="text-primary" />
                 </div>
-                <h2 className="text-lg font-bold text-slate-900 mb-3">Incidencia pendiente de atender</h2>
-                <div className="bg-white rounded-xl p-5 mb-5 text-left border border-slate-200 shadow-sm">
-                  <div className="text-sm font-bold text-slate-900 mb-3">{boardTicket.key}</div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-gray-100 mb-3">Incidencia pendiente de atender</h2>
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-5 mb-5 text-left border border-slate-200 dark:border-gray-700 shadow-sm">
+                  <div className="text-sm font-bold text-slate-900 dark:text-gray-100 mb-3">{boardTicket.key}</div>
                   <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div><span className="text-slate-400">Tipo</span><p className="font-medium text-slate-800">{boardTicket.issue_type}</p></div>
-                    <div><span className="text-slate-400">Prioridad</span>
+                    <div><span className="text-slate-400 dark:text-gray-500">Tipo</span><p className="font-medium text-slate-800 dark:text-gray-200">{boardTicket.issue_type}</p></div>
+                    <div><span className="text-slate-400 dark:text-gray-500">Prioridad</span>
                       <p className="font-semibold flex items-center gap-1" style={{ color: pColors[boardTicket.priority] || "#3B82F6" }}>
                         <span className="w-2 h-2 rounded-full" style={{ backgroundColor: pColors[boardTicket.priority] }} />
                         {pLabels[boardTicket.priority] || boardTicket.priority}
                       </p>
                     </div>
-                    <div><span className="text-slate-400">Estado</span><p className="font-medium text-slate-800">{boardTicket.status}</p></div>
+                    <div><span className="text-slate-400 dark:text-gray-500">Estado</span><p className="font-medium text-slate-800 dark:text-gray-200">{boardTicket.status}</p></div>
                   </div>
                 </div>
                 <button onClick={() => onConfirmIngest(boardTicket.key)}
@@ -188,16 +188,16 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
     <div className="flex flex-col h-full">
       {/* Chat Header */}
       {ticket && (
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-slate-900">[ANON] {ticket.kosin_id}</h2>
-              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded uppercase">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-gray-100">[ANON] {ticket.kosin_id}</h2>
+              <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] font-bold rounded uppercase">
                 {statusLabels[ticket.status] || ticket.status}
               </span>
             </div>
             <div className="flex items-center gap-3 mt-1">
-              <span className="flex items-center gap-1 text-xs text-slate-500">
+              <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-gray-400">
                 <IconPriority />
                 Prioridad: <span className="font-semibold uppercase" style={{ color: pColors[ticket.priority] || "#3B82F6" }}>
                   {pLabels[ticket.priority] || ticket.priority}
@@ -209,12 +209,12 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
       )}
 
       {/* Chat messages */}
-      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-50/50" role="log" aria-label="Historial de chat" aria-live="polite">
+      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-50/50 dark:bg-gray-900" role="log" aria-label="Historial de chat" aria-live="polite">
         {messages.length === 0 && !isThinking && !streamingContent && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <IconChat size={48} className="text-slate-300 mx-auto mb-3" />
-              <p className="text-sm text-slate-400">Escribe un mensaje para comenzar</p>
+              <IconChat size={48} className="text-slate-300 dark:text-gray-600 mx-auto mb-3" />
+              <p className="text-sm text-slate-400 dark:text-gray-500">Escribe un mensaje para comenzar</p>
             </div>
           </div>
         )}
@@ -226,14 +226,14 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
             <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
               <IconAgent className="text-primary" />
             </div>
-            <div className="bg-white border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4">
+            <div className="bg-white dark:bg-gray-800 border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4">
               <div className="flex items-center gap-2">
                 <div className="flex gap-1">
                   <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                   <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                   <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                 </div>
-                <span className="text-xs text-slate-400">Analizando...</span>
+                <span className="text-xs text-slate-400 dark:text-gray-500">Analizando...</span>
               </div>
             </div>
           </div>
@@ -244,8 +244,8 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
             <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
               <IconAgent className="text-primary" />
             </div>
-            <div className="bg-white border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4">
-              <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
+            <div className="bg-white dark:bg-gray-800 border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4">
+              <div className="text-sm text-slate-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">
                 {streamingContent.replace(/\[CHIPS[:\s].*?\]/gs, "").replace(/\[CHIPS[:\s].*$/s, "").trim()}
                 <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 rounded-full" />
               </div>
@@ -258,11 +258,11 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
 
       {/* Suggested action chips */}
       {suggestedChips.length > 0 && !isStreaming && (
-        <div className="px-6 pt-2 pb-0 bg-slate-50/50" role="group" aria-label="Acciones sugeridas">
+        <div className="px-6 pt-2 pb-0 bg-slate-50/50 dark:bg-gray-900" role="group" aria-label="Acciones sugeridas">
           <div className="flex flex-wrap gap-2">
             {suggestedChips.map((chip, i) => (
               <button key={i} onClick={() => handleSend(chip, true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-full text-xs font-medium hover:border-primary hover:text-primary transition-all shadow-sm cursor-pointer">
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700 text-slate-600 dark:text-gray-300 rounded-full text-xs font-medium hover:border-primary hover:text-primary transition-all shadow-sm cursor-pointer">
                 <IconBolt />
                 {chip}
               </button>
@@ -272,20 +272,20 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
       )}
 
       {/* Input area */}
-      <div className="p-6 border-t border-slate-200 bg-white">
+      <div className="p-6 border-t border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="relative mb-4">
           <label htmlFor="chat-input" className="sr-only">Mensaje al agente IA</label>
           <textarea id="chat-input" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
             placeholder="Escribe tu mensaje..." disabled={isStreaming} rows={2}
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-14 text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all outline-none resize-none disabled:opacity-50 placeholder:text-slate-400" />
+            className="w-full bg-slate-50 dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-xl px-4 py-3 pr-14 text-sm text-slate-900 dark:text-gray-100 focus:ring-2 focus:ring-primary focus:border-transparent transition-all outline-none resize-none disabled:opacity-50 placeholder:text-slate-400 dark:placeholder:text-gray-500" />
           <button onClick={() => handleSend()} disabled={isStreaming || !input.trim()} aria-label="Enviar mensaje"
-            className="absolute right-3 bottom-3 w-8 h-8 bg-primary text-white rounded-lg flex items-center justify-center hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20 disabled:bg-slate-300 disabled:shadow-none disabled:cursor-not-allowed">
+            className="absolute right-3 bottom-3 w-8 h-8 bg-primary text-white rounded-lg flex items-center justify-center hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20 disabled:bg-slate-300 dark:disabled:bg-gray-600 disabled:shadow-none disabled:cursor-not-allowed">
             <IconSend />
           </button>
         </div>
         <div className="flex items-center justify-between">
           <div className="flex gap-2">
-            <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="Adjuntar archivo">
+            <button className="p-2 text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Adjuntar archivo">
               <IconClip />
             </button>
           </div>
@@ -309,7 +309,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
                   {isSyncing ? "Sincronizando..." : "Sincronizar con origen"}
                 </button>
                 <button onClick={() => setShowEscalation(true)}
-                  className="flex items-center gap-2 px-4 py-2 border-2 border-amber-500 text-amber-600 rounded-lg text-sm font-bold hover:bg-amber-500 hover:text-white transition-all">
+                  className="flex items-center gap-2 px-4 py-2 border-2 border-amber-500 text-amber-600 dark:text-amber-400 rounded-lg text-sm font-bold hover:bg-amber-500 hover:text-white transition-all">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
                   Escalar
                 </button>

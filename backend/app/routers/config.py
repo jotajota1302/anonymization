@@ -155,6 +155,30 @@ async def test_integration(name: str):
 
 class GeneralSettings(BaseModel):
     polling_interval_sec: Optional[int] = None
+    dark_mode: Optional[bool] = None
+
+
+async def _get_general_extra(db) -> dict:
+    """Get general extra_config from DB, seeding defaults if absent."""
+    row = await db.get_system_config("general")
+    if row and row.get("extra_config"):
+        raw = row["extra_config"]
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif isinstance(raw, dict):
+            return raw
+    defaults = {"dark_mode": False}
+    await db.upsert_system_config(
+        "general",
+        display_name="General Settings",
+        system_type="internal",
+        connector_type="none",
+        extra_config=json.dumps(defaults),
+    )
+    return defaults
 
 
 @router.get("/general")
@@ -162,10 +186,10 @@ async def get_general_settings():
     db = _get_app_state().get("db")
     if not db:
         raise HTTPException(status_code=503, detail="Database not ready")
-    # Use kosin config as reference for global polling interval
     config = await db.get_system_config("kosin")
     polling = config.get("polling_interval_sec", 60) if config else 60
-    return {"polling_interval_sec": polling}
+    extra = await _get_general_extra(db)
+    return {"polling_interval_sec": polling, "dark_mode": extra.get("dark_mode", False)}
 
 
 @router.put("/general")
@@ -174,14 +198,189 @@ async def update_general_settings(body: GeneralSettings):
     if not db:
         raise HTTPException(status_code=503, detail="Database not ready")
     if body.polling_interval_sec is not None:
-        # Update polling interval on all systems
         configs = await db.get_all_system_configs()
         for cfg in configs:
-            await db.upsert_system_config(
-                cfg["system_name"],
-                polling_interval_sec=body.polling_interval_sec
-            )
-    return {"status": "ok", "polling_interval_sec": body.polling_interval_sec}
+            if cfg.get("system_name") and cfg["system_name"] != "general":
+                await db.upsert_system_config(
+                    cfg["system_name"],
+                    polling_interval_sec=body.polling_interval_sec
+                )
+    if body.dark_mode is not None:
+        extra = await _get_general_extra(db)
+        extra["dark_mode"] = body.dark_mode
+        await db.upsert_system_config("general", extra_config=json.dumps(extra))
+    result = {"status": "ok"}
+    if body.polling_interval_sec is not None:
+        result["polling_interval_sec"] = body.polling_interval_sec
+    if body.dark_mode is not None:
+        result["dark_mode"] = body.dark_mode
+    return result
+
+
+# --- Agent config endpoints ---
+
+_ALL_TOOLS_META = [
+    {"name": "read_ticket", "description": "Consulta ticket completo del sistema origen"},
+    {"name": "update_kosin", "description": "Comenta/cambia estado en KOSIN"},
+    {"name": "create_kosin_ticket", "description": "Crea ticket nuevo en KOSIN"},
+    {"name": "execute_action", "description": "Ejecuta accion tecnica controlada"},
+    {"name": "read_attachment", "description": "Lee adjunto de ticket (PDF, img, docs)"},
+]
+
+
+async def _get_agent_config(db) -> dict:
+    """Get agent config from DB, seeding defaults if absent."""
+    from ..config import settings as s
+    row = await db.get_system_config("agent")
+    if row and row.get("extra_config"):
+        raw = row["extra_config"]
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif isinstance(raw, dict):
+            return raw
+    defaults = {
+        "provider": s.llm_provider,
+        "model": s.ollama_model if s.llm_provider == "ollama" else s.azure_openai_deployment,
+        "temperature": 0.3,
+        "tools": {t["name"]: True for t in _ALL_TOOLS_META},
+    }
+    await db.upsert_system_config(
+        "agent",
+        display_name="Agent Config",
+        system_type="internal",
+        connector_type="none",
+        extra_config=json.dumps(defaults),
+    )
+    return defaults
+
+
+@router.get("/agent")
+async def get_agent_config():
+    db = _get_app_state().get("db")
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    from ..config import settings as s
+    config = await _get_agent_config(db)
+    state = _get_app_state()
+
+    tool_states = config.get("tools", {})
+    tools_list = [
+        {**t, "enabled": tool_states.get(t["name"], True)}
+        for t in _ALL_TOOLS_META
+    ]
+
+    result = {
+        "provider": config.get("provider", s.llm_provider),
+        "model": config.get("model", s.ollama_model),
+        "temperature": config.get("temperature", 0.3),
+        "system_prompt": state.get("system_prompt", ""),
+        "available_providers": ["ollama", "azure"],
+        "tools": tools_list,
+        "ollama_config": {
+            "base_url": s.ollama_base_url,
+            "available_models": [],
+        },
+        "azure_config": {
+            "endpoint_masked": _mask_token(s.azure_openai_endpoint),
+            "deployment": s.azure_openai_deployment,
+            "api_version": s.azure_openai_api_version,
+        },
+    }
+
+    # Fetch available Ollama models
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{s.ollama_base_url}/api/tags")
+            if resp.status_code == 200:
+                data = resp.json()
+                result["ollama_config"]["available_models"] = [
+                    m.get("name", m.get("model", "")) for m in data.get("models", [])
+                ]
+    except Exception:
+        pass
+
+    return result
+
+
+class AgentConfigUpdate(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    system_prompt: Optional[str] = None
+
+
+@router.put("/agent")
+async def update_agent_config(body: AgentConfigUpdate):
+    db = _get_app_state().get("db")
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    state = _get_app_state()
+    config = await _get_agent_config(db)
+
+    if body.provider is not None:
+        config["provider"] = body.provider
+    if body.model is not None:
+        config["model"] = body.model
+    if body.temperature is not None:
+        config["temperature"] = max(0.0, min(1.0, body.temperature))
+
+    await db.upsert_system_config("agent", extra_config=json.dumps(config))
+
+    # Hot-reload system prompt
+    if body.system_prompt is not None:
+        state["system_prompt"] = body.system_prompt
+        logger.info("system_prompt_hot_reloaded", length=len(body.system_prompt))
+
+    # Hot-reload LLM if provider or model changed
+    if body.provider is not None or body.model is not None or body.temperature is not None:
+        agent = state.get("agent")
+        if agent:
+            try:
+                agent.update_llm(
+                    provider=config["provider"],
+                    model=config["model"],
+                    temperature=config.get("temperature", 0.3),
+                )
+            except Exception as e:
+                logger.error("agent_llm_hot_reload_failed", error=str(e))
+                return {**config, "warning": f"Config guardada pero fallo al recargar LLM: {str(e)}"}
+
+    return config
+
+
+class AgentToolsUpdate(BaseModel):
+    tools: Dict[str, bool]
+
+
+@router.put("/agent/tools")
+async def update_agent_tools(body: AgentToolsUpdate):
+    db = _get_app_state().get("db")
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    state = _get_app_state()
+    config = await _get_agent_config(db)
+    config["tools"] = {**config.get("tools", {}), **body.tools}
+
+    await db.upsert_system_config("agent", extra_config=json.dumps(config))
+
+    # Hot-reload tools on agent
+    agent = state.get("agent")
+    if agent:
+        agent.set_active_tools(config["tools"])
+
+    return {"tools": config["tools"]}
+
+
+@router.get("/agent/default-prompt")
+async def get_default_prompt():
+    from ..services.agent import DEFAULT_SYSTEM_PROMPT
+    return {"system_prompt": DEFAULT_SYSTEM_PROMPT}
 
 
 # --- Anonymization settings endpoints ---

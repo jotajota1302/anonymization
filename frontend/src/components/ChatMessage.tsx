@@ -15,7 +15,7 @@ const KOSIN_BASE = "https://umane.emeal.nttdata.com/jiraito/browse";
 
 function TokenBadge({ token }: { token: string }) {
   return (
-    <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-xs font-mono font-bold">
+    <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 rounded text-xs font-mono font-bold">
       {token}
     </span>
   );
@@ -65,11 +65,11 @@ function AgentContent({ content }: { content: string }) {
   const cleaned = stripChips(content);
 
   return (
-    <div className="text-sm leading-relaxed text-slate-800 prose prose-sm prose-slate max-w-none
-      prose-headings:text-slate-900 prose-headings:font-bold prose-headings:mt-4 prose-headings:mb-2
+    <div className="text-sm leading-relaxed text-slate-800 dark:text-gray-200 prose prose-sm prose-slate dark:prose-invert max-w-none
+      prose-headings:text-slate-900 dark:prose-headings:text-gray-100 prose-headings:font-bold prose-headings:mt-4 prose-headings:mb-2
       prose-h2:text-base prose-h3:text-sm
       prose-p:my-2 prose-p:leading-relaxed
-      prose-strong:text-slate-900 prose-strong:font-semibold
+      prose-strong:text-slate-900 dark:prose-strong:text-gray-100 prose-strong:font-semibold
       prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5
       prose-a:text-primary prose-a:no-underline hover:prose-a:underline">
       <ReactMarkdown
@@ -87,7 +87,7 @@ function AgentContent({ content }: { content: string }) {
             return <li>{children}</li>;
           },
           code: ({ children }) => (
-            <code className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-mono">{children}</code>
+            <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-700 dark:text-gray-300 rounded text-xs font-mono">{children}</code>
           ),
         }}
       >
@@ -110,7 +110,7 @@ export function ChatMessage({ message }: Props) {
 
       <div className={
         isAgent
-          ? "bg-white border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4"
+          ? "bg-white dark:bg-gray-800 border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4"
           : "bg-primary text-white shadow-md rounded-l-xl rounded-br-xl p-4 max-w-[85%]"
       }>
         {isAgent ? (
@@ -118,7 +118,7 @@ export function ChatMessage({ message }: Props) {
         ) : (
           <div className="text-sm leading-relaxed text-white">{message.content}</div>
         )}
-        <span className={`text-[10px] mt-2 block ${isAgent ? "text-slate-400" : "text-blue-100 text-right"}`}>
+        <span className={`text-[10px] mt-2 block ${isAgent ? "text-slate-400 dark:text-gray-500" : "text-blue-100 text-right"}`}>
           <time dateTime={message.timestamp}>
             {isAgent ? "AI Agent" : "Tu"} &bull;{" "}
             {new Date(message.timestamp).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
@@ -127,7 +127,7 @@ export function ChatMessage({ message }: Props) {
       </div>
 
       {!isAgent && (
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-300 to-slate-400 flex items-center justify-center shrink-0">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-300 to-slate-400 dark:from-gray-600 dark:to-gray-500 flex items-center justify-center shrink-0">
           <span className="text-white text-[10px] font-bold">OP</span>
         </div>
       )}

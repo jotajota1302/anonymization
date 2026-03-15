@@ -36,6 +36,23 @@ export interface BoardTicket {
   source_system: string;
 }
 
+export interface AgentConfig {
+  provider: string;
+  model: string;
+  temperature: number;
+  system_prompt: string;
+  available_providers: string[];
+  tools: AgentTool[];
+  ollama_config?: { base_url: string; available_models: string[] };
+  azure_config?: { endpoint_masked: string; deployment: string; api_version: string };
+}
+
+export interface AgentTool {
+  name: string;
+  description: string;
+  enabled: boolean;
+}
+
 export interface IntegrationConfig {
   id: number;
   system_name: string;

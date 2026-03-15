@@ -220,7 +220,7 @@ export default function Home() {
     : null;
 
   return (
-    <div className="bg-[#F8FAFC] text-slate-900 min-h-screen flex flex-col overflow-hidden">
+    <div className="bg-[#F8FAFC] dark:bg-gray-900 text-slate-900 dark:text-gray-100 min-h-screen flex flex-col overflow-hidden">
       <Header
         activePage="incidencias"
         isConnected={isConnected}
@@ -250,14 +250,14 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden">
-        <aside className="w-[30%] bg-navy-deep flex flex-col border-r border-slate-800 overflow-y-auto custom-scrollbar" aria-label="Lista de incidencias">
+        <aside className="w-[30%] bg-navy-deep dark:bg-gray-950 flex flex-col border-r border-slate-800 dark:border-gray-700 overflow-y-auto custom-scrollbar" aria-label="Lista de incidencias">
           <TicketList
             boardTickets={boardTickets} tickets={tickets}
             selectedTicketId={selectedTicketId} selectedBoardKey={selectedBoardKey}
             onSelectTicket={handleSelectTicket} onSelectBoardTicket={handleSelectBoardTicket}
           />
         </aside>
-        <section id="main-content" className="flex-1 flex flex-col bg-white">
+        <section id="main-content" className="flex-1 flex flex-col bg-white dark:bg-gray-900">
           <ChatPanel
             ticketId={selectedTicketId} boardTicket={selectedBoardTicket}
             onSendMessage={handleSendMessage} onFinishTicket={handleFinishTicket}
@@ -275,8 +275,8 @@ export default function Home() {
         <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-4 fade-in duration-300">
           <div className={`flex items-center gap-3 px-5 py-3 rounded-lg shadow-lg border text-sm font-medium ${
             toast.type === "error"
-              ? "bg-red-50 border-red-200 text-red-800"
-              : "bg-green-50 border-green-200 text-green-800"
+              ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300"
+              : "bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300"
           }`}>
             <span>{toast.type === "error" ? "\u26A0" : "\u2713"}</span>
             <span>{toast.message}</span>
@@ -288,7 +288,7 @@ export default function Home() {
       {/* Confirm modal */}
       {confirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 border border-slate-200">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 border border-slate-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

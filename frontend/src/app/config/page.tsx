@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { IntegrationConfig } from "@/types";
+import type { IntegrationConfig, AgentConfig, AgentTool } from "@/types";
 import { Header } from "@/components/Header";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-type Tab = "general" | "anonymization" | "integrations" | "tickets";
+type Tab = "general" | "anonymization" | "agent" | "integrations" | "tickets";
 
 const IconShield = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -28,6 +28,11 @@ const IconDatabase = () => (
     <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
   </svg>
 );
+const IconBrain = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7.001 7.001 0 0113 22h-2a7.001 7.001 0 01-6.93-6H3a1 1 0 110-2h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2z"/>
+  </svg>
+);
 const IconCheck = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12"/>
@@ -42,6 +47,7 @@ const IconTrash = () => (
 const tabs: { id: Tab; label: string; icon: JSX.Element }[] = [
   { id: "general", label: "General", icon: <IconSettings /> },
   { id: "anonymization", label: "Anonimizacion", icon: <IconShield /> },
+  { id: "agent", label: "Agente", icon: <IconBrain /> },
   { id: "integrations", label: "Integraciones", icon: <IconPlug /> },
   { id: "tickets", label: "Tickets", icon: <IconDatabase /> },
 ];
@@ -58,17 +64,17 @@ const PII_RULES_META: { id: string; label: string; category: string }[] = [
 ];
 
 const priorityConfig: Record<string, { bg: string; text: string; label: string }> = {
-  critical: { bg: "bg-red-100", text: "text-red-700", label: "Critica" },
-  high: { bg: "bg-amber-100", text: "text-amber-700", label: "Alta" },
-  medium: { bg: "bg-blue-100", text: "text-blue-700", label: "Media" },
-  low: { bg: "bg-green-100", text: "text-green-700", label: "Baja" },
+  critical: { bg: "bg-red-100 dark:bg-red-900/30", text: "text-red-700 dark:text-red-400", label: "Critica" },
+  high: { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-400", label: "Alta" },
+  medium: { bg: "bg-blue-100 dark:bg-blue-900/30", text: "text-blue-700 dark:text-blue-400", label: "Media" },
+  low: { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-700 dark:text-green-400", label: "Baja" },
 };
 
 const statusConfig: Record<string, { bg: string; text: string; label: string }> = {
-  open: { bg: "bg-blue-100", text: "text-blue-700", label: "Abierto" },
-  in_progress: { bg: "bg-emerald-100", text: "text-emerald-700", label: "En progreso" },
-  resolved: { bg: "bg-slate-100", text: "text-slate-600", label: "Resuelto" },
-  closed: { bg: "bg-slate-100", text: "text-slate-500", label: "Cerrado" },
+  open: { bg: "bg-blue-100 dark:bg-blue-900/30", text: "text-blue-700 dark:text-blue-400", label: "Abierto" },
+  in_progress: { bg: "bg-emerald-100 dark:bg-emerald-900/30", text: "text-emerald-700 dark:text-emerald-400", label: "En progreso" },
+  resolved: { bg: "bg-slate-100 dark:bg-gray-700", text: "text-slate-600 dark:text-gray-300", label: "Resuelto" },
+  closed: { bg: "bg-slate-100 dark:bg-gray-700", text: "text-slate-500 dark:text-gray-400", label: "Cerrado" },
 };
 
 interface AdminTicket {
@@ -105,10 +111,18 @@ function systemBgColor(name: string): string {
   return "bg-orange-500";
 }
 
+// Shared CSS classes
+const cardCls = "bg-white dark:bg-gray-800 rounded-xl border border-slate-200 dark:border-gray-700 shadow-sm";
+const inputCls = "w-full px-3 py-2 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-lg text-sm text-slate-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-primary focus:border-transparent";
+const labelCls = "block text-xs font-semibold text-slate-700 dark:text-gray-300 mb-1";
+const h2Cls = "text-lg font-bold text-slate-900 dark:text-gray-100 mb-1";
+const descCls = "text-sm text-slate-500 dark:text-gray-400";
+const btnPrimary = "px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50";
+
 export default function ConfigPage() {
   const [activeTab, setActiveTab] = useState<Tab>("integrations");
 
-  // Anonymization settings state (loaded from backend)
+  // Anonymization settings state
   const [detectorType, setDetectorType] = useState("composite");
   const [activeDetector, setActiveDetector] = useState("unknown");
   const [presidioAvailable, setPresidioAvailable] = useState(false);
@@ -130,6 +144,20 @@ export default function ConfigPage() {
   // General settings state
   const [pollingInterval, setPollingInterval] = useState(60);
   const [generalLoaded, setGeneralLoaded] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Agent settings state
+  const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null);
+  const [agentProvider, setAgentProvider] = useState("ollama");
+  const [agentModel, setAgentModel] = useState("");
+  const [agentTemp, setAgentTemp] = useState(0.3);
+  const [agentPrompt, setAgentPrompt] = useState("");
+  const [agentPromptSaved, setAgentPromptSaved] = useState("");
+  const [agentTools, setAgentTools] = useState<AgentTool[]>([]);
+  const [agentSaving, setAgentSaving] = useState(false);
+  const [agentSaved, setAgentSaved] = useState(false);
+  const [promptSaving, setPromptSaving] = useState(false);
+  const [promptSaved, setPromptSaved] = useState(false);
 
   // Admin tickets state
   const [adminTickets, setAdminTickets] = useState<AdminTicket[]>([]);
@@ -153,10 +181,21 @@ export default function ConfigPage() {
       if (res.ok) {
         const data = await res.json();
         setPollingInterval(data.polling_interval_sec || 60);
+        const dm = data.dark_mode ?? false;
+        setDarkMode(dm);
+        // Sync with localStorage
+        const localDark = localStorage.getItem("dark_mode") === "true";
+        if (localDark !== dm) {
+          // localStorage takes precedence on first load
+          setDarkMode(localDark);
+        }
         setGeneralLoaded(true);
       }
     } catch (err) {
       console.error("Failed to fetch general settings:", err);
+      // Fallback to localStorage
+      setDarkMode(localStorage.getItem("dark_mode") === "true");
+      setGeneralLoaded(true);
     }
   }, []);
 
@@ -189,12 +228,31 @@ export default function ConfigPage() {
     }
   }, []);
 
+  const fetchAgentConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/config/agent`);
+      if (res.ok) {
+        const data: AgentConfig = await res.json();
+        setAgentConfig(data);
+        setAgentProvider(data.provider);
+        setAgentModel(data.model);
+        setAgentTemp(data.temperature);
+        setAgentPrompt(data.system_prompt);
+        setAgentPromptSaved(data.system_prompt);
+        setAgentTools(data.tools);
+      }
+    } catch (err) {
+      console.error("Failed to fetch agent config:", err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchIntegrations();
     fetchGeneralSettings();
     fetchAdminTickets();
     fetchAnonymization();
-  }, [fetchIntegrations, fetchGeneralSettings, fetchAdminTickets, fetchAnonymization]);
+    fetchAgentConfig();
+  }, [fetchIntegrations, fetchGeneralSettings, fetchAdminTickets, fetchAnonymization, fetchAgentConfig]);
 
   const handleExpand = (systemName: string) => {
     if (expandedSystem === systemName) {
@@ -277,6 +335,22 @@ export default function ConfigPage() {
     }
   };
 
+  const handleToggleDarkMode = async () => {
+    const newVal = !darkMode;
+    setDarkMode(newVal);
+    localStorage.setItem("dark_mode", String(newVal));
+    document.documentElement.classList.toggle("dark", newVal);
+    try {
+      await fetch(`${API_URL}/api/config/general`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dark_mode: newVal }),
+      });
+    } catch (err) {
+      console.error("Failed to save dark mode:", err);
+    }
+  };
+
   const handleDeleteTicket = async (kosinKey: string) => {
     setDeleting(kosinKey);
     setDeleteError(null);
@@ -324,11 +398,88 @@ export default function ConfigPage() {
     }
   };
 
+  // Agent handlers
+  const handleSaveAgentLLM = async () => {
+    setAgentSaving(true);
+    setAgentSaved(false);
+    try {
+      const res = await fetch(`${API_URL}/api/config/agent`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: agentProvider, model: agentModel, temperature: agentTemp }),
+      });
+      if (res.ok) {
+        setAgentSaved(true);
+        setTimeout(() => setAgentSaved(false), 3000);
+        await fetchAgentConfig();
+      }
+    } catch (err) {
+      console.error("Failed to save agent LLM config:", err);
+    } finally {
+      setAgentSaving(false);
+    }
+  };
+
+  const handleSavePrompt = async () => {
+    setPromptSaving(true);
+    setPromptSaved(false);
+    try {
+      const res = await fetch(`${API_URL}/api/config/agent`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ system_prompt: agentPrompt }),
+      });
+      if (res.ok) {
+        setAgentPromptSaved(agentPrompt);
+        setPromptSaved(true);
+        setTimeout(() => setPromptSaved(false), 3000);
+      }
+    } catch (err) {
+      console.error("Failed to save prompt:", err);
+    } finally {
+      setPromptSaving(false);
+    }
+  };
+
+  const handleRestoreDefaultPrompt = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/config/agent/default-prompt`);
+      if (res.ok) {
+        const data = await res.json();
+        setAgentPrompt(data.system_prompt);
+      }
+    } catch (err) {
+      console.error("Failed to fetch default prompt:", err);
+    }
+  };
+
+  const handleToggleTool = async (toolName: string, enabled: boolean) => {
+    // Optimistic update
+    setAgentTools((prev) => prev.map((t) => t.name === toolName ? { ...t, enabled } : t));
+    try {
+      await fetch(`${API_URL}/api/config/agent/tools`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tools: { [toolName]: enabled } }),
+      });
+    } catch (err) {
+      // Revert
+      setAgentTools((prev) => prev.map((t) => t.name === toolName ? { ...t, enabled: !enabled } : t));
+      console.error("Failed to toggle tool:", err);
+    }
+  };
+
   const sensitivityLabel = sensitivity < 35 ? "CONSERVADOR" : sensitivity < 70 ? "EQUILIBRADO" : "AGRESIVO";
   const sensitivityColor = sensitivity < 35 ? "text-green-600" : sensitivity < 70 ? "text-primary" : "text-red-500";
 
+  const activeToolsCount = agentTools.filter((t) => t.enabled).length;
+  const promptModified = agentPrompt !== agentPromptSaved;
+
+  const ollamaModels = agentConfig?.ollama_config?.available_models || [];
+  const tempLabel = agentTemp <= 0.2 ? "Preciso" : agentTemp <= 0.5 ? "Equilibrado" : agentTemp <= 0.8 ? "Creativo" : "Experimental";
+
   return (
-    <div className="bg-[#F8FAFC] text-slate-900 h-screen flex flex-col overflow-hidden">
+    <div className="bg-[#F8FAFC] dark:bg-gray-900 text-slate-900 dark:text-gray-100 h-screen flex flex-col overflow-hidden">
       <Header
         activePage="config"
         subheader={
@@ -343,14 +494,14 @@ export default function ConfigPage() {
       {/* Content */}
       <div className="flex-1 flex min-h-0">
         {/* Sidebar */}
-        <aside className="w-64 bg-white border-r border-slate-200 p-4 shrink-0">
+        <aside className="w-64 bg-white dark:bg-gray-800 border-r border-slate-200 dark:border-gray-700 p-4 shrink-0">
           <div className="space-y-1">
             {tabs.map((tab) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   activeTab === tab.id
                     ? "bg-primary/10 text-primary border-r-2 border-primary"
-                    : "text-slate-600 hover:bg-slate-50"
+                    : "text-slate-600 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-gray-700"
                 }`}>
                 {tab.icon}
                 {tab.label}
@@ -362,12 +513,249 @@ export default function ConfigPage() {
         {/* Main */}
         <main className="flex-1 overflow-y-auto p-8">
           <div className={activeTab === "tickets" ? "max-w-6xl" : "max-w-3xl"}>
+
+            {/* ===== GENERAL TAB ===== */}
+            {activeTab === "general" && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className={h2Cls}>Configuracion General</h2>
+                  <p className={descCls}>Parametros generales de la plataforma.</p>
+                </div>
+
+                {/* Dark Mode */}
+                <div className={`${cardCls} p-6`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-gray-100">Modo oscuro</p>
+                      <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Cambia la apariencia de toda la interfaz</p>
+                    </div>
+                    <button
+                      onClick={handleToggleDarkMode}
+                      className={`relative w-12 h-6 rounded-full transition-colors ${darkMode ? "bg-primary" : "bg-slate-300 dark:bg-gray-600"}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${darkMode ? "left-[26px]" : "left-0.5"}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Polling interval */}
+                <div className={`${cardCls} p-6 space-y-4`}>
+                  <div>
+                    <label className={labelCls}>Intervalo de refresco del board (seg)</label>
+                    <input
+                      type="number"
+                      min={5}
+                      value={generalLoaded ? pollingInterval : 60}
+                      onChange={(e) => setPollingInterval(Number(e.target.value))}
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <button onClick={handleSaveGeneral} className={btnPrimary}>
+                    Guardar configuracion
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ===== AGENT TAB ===== */}
+            {activeTab === "agent" && (
+              <div className="space-y-8">
+                {/* Section 1: Provider & Model */}
+                <section>
+                  <h2 className={h2Cls}>Proveedor y Modelo</h2>
+                  <p className={`${descCls} mb-4`}>Configura el LLM que usa el agente de anonimizacion.</p>
+
+                  {/* Provider radio cards */}
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    {[
+                      { id: "ollama", title: "Ollama", desc: "Desarrollo local", color: "green" },
+                      { id: "azure", title: "Azure OpenAI", desc: "Produccion GDPR", color: "blue" },
+                    ].map((p) => (
+                      <button key={p.id} onClick={() => setAgentProvider(p.id)}
+                        className={`p-4 rounded-xl border text-left transition-all ${
+                          agentProvider === p.id
+                            ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
+                            : "border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-slate-300 dark:hover:border-gray-600"
+                        }`}>
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${
+                            p.id === "ollama" ? "bg-green-600" : "bg-blue-600"
+                          }`}>
+                            {p.id === "ollama" ? (
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="3"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="16" x2="13" y2="16"/></svg>
+                            ) : (
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900 dark:text-gray-100">{p.title}</p>
+                            <p className="text-xs text-slate-500 dark:text-gray-400">{p.desc}</p>
+                          </div>
+                          <div className={`ml-auto w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                            agentProvider === p.id ? "border-primary bg-primary" : "border-slate-300 dark:border-gray-600"
+                          }`}>
+                            {agentProvider === p.id && <IconCheck />}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Model selection */}
+                  <div className={`${cardCls} p-5 space-y-4`}>
+                    {agentProvider === "ollama" ? (
+                      <>
+                        <div>
+                          <label className={labelCls}>Modelo</label>
+                          <select value={agentModel} onChange={(e) => setAgentModel(e.target.value)} className={inputCls}>
+                            {ollamaModels.length > 0 ? (
+                              ollamaModels.map((m) => <option key={m} value={m}>{m}</option>)
+                            ) : (
+                              <option value={agentModel}>{agentModel}</option>
+                            )}
+                          </select>
+                          {ollamaModels.length === 0 && (
+                            <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">No se pudo conectar con Ollama para listar modelos</p>
+                          )}
+                        </div>
+                        <div>
+                          <label className={labelCls}>URL Base Ollama</label>
+                          <input type="text" value={agentConfig?.ollama_config?.base_url || ""} disabled className={`${inputCls} opacity-60`} />
+                          <p className="text-[11px] text-slate-400 dark:text-gray-500 mt-1">Configurado via variable de entorno OLLAMA_BASE_URL</p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label className={labelCls}>Deployment</label>
+                          <input type="text" value={agentModel} onChange={(e) => setAgentModel(e.target.value)} className={inputCls} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className={labelCls}>Endpoint</label>
+                            <input type="text" value={agentConfig?.azure_config?.endpoint_masked || ""} disabled className={`${inputCls} opacity-60`} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>API Version</label>
+                            <input type="text" value={agentConfig?.azure_config?.api_version || ""} disabled className={`${inputCls} opacity-60`} />
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-slate-400 dark:text-gray-500">Endpoint y API key configurados via variables de entorno</p>
+                      </>
+                    )}
+
+                    {/* Temperature slider */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className={labelCls}>Temperatura</label>
+                        <span className="text-xs font-semibold text-primary">{agentTemp.toFixed(1)} — {tempLabel}</span>
+                      </div>
+                      <input type="range" min="0" max="1" step="0.1" value={agentTemp}
+                        onChange={(e) => setAgentTemp(Number(e.target.value))}
+                        className="w-full h-2 bg-slate-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
+                      <div className="flex justify-between text-[10px] text-slate-400 dark:text-gray-500 mt-1">
+                        <span>Preciso</span>
+                        <span>Creativo</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 mt-4">
+                    {agentSaved && (
+                      <span className="text-sm font-medium text-green-600 dark:text-green-400 flex items-center gap-1">
+                        <IconCheck /> Guardado
+                      </span>
+                    )}
+                    <button onClick={handleSaveAgentLLM} disabled={agentSaving} className={btnPrimary}>
+                      {agentSaving ? "Guardando..." : "Guardar Configuracion LLM"}
+                    </button>
+                  </div>
+                </section>
+
+                {/* Section 2: System Prompt */}
+                <section>
+                  <div className="flex items-center justify-between mb-1">
+                    <h2 className={h2Cls}>System Prompt</h2>
+                    <div className="flex items-center gap-2">
+                      {promptModified && (
+                        <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">MODIFICADO</span>
+                      )}
+                      <span className="text-xs text-slate-400 dark:text-gray-500">{agentPrompt.length} caracteres</span>
+                    </div>
+                  </div>
+                  <p className={`${descCls} mb-4`}>El prompt del sistema define el comportamiento del agente. Los cambios se aplican inmediatamente.</p>
+
+                  <textarea
+                    value={agentPrompt}
+                    onChange={(e) => setAgentPrompt(e.target.value)}
+                    className={`${inputCls} font-mono text-xs leading-relaxed resize-y`}
+                    style={{ minHeight: "400px" }}
+                  />
+
+                  <div className="flex items-center justify-between mt-4">
+                    <button onClick={handleRestoreDefaultPrompt}
+                      className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-gray-400 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-700 transition-colors">
+                      Restaurar por defecto
+                    </button>
+                    <div className="flex items-center gap-3">
+                      {promptSaved && (
+                        <span className="text-sm font-medium text-green-600 dark:text-green-400 flex items-center gap-1">
+                          <IconCheck /> Guardado
+                        </span>
+                      )}
+                      <button onClick={handleSavePrompt} disabled={promptSaving} className={btnPrimary}>
+                        {promptSaving ? "Guardando..." : "Guardar Prompt"}
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Section 3: Tools */}
+                <section>
+                  <div className="flex items-center justify-between mb-1">
+                    <h2 className={h2Cls}>Herramientas (Tools)</h2>
+                    <span className="px-2.5 py-1 text-xs font-bold bg-primary/10 text-primary rounded-full">
+                      {activeToolsCount}/{agentTools.length} activas
+                    </span>
+                  </div>
+                  <p className={`${descCls} mb-4`}>Activa o desactiva las herramientas que el agente puede usar. Los cambios se aplican inmediatamente.</p>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {agentTools.map((tool) => (
+                      <div key={tool.name}
+                        className={`p-4 rounded-xl border transition-all ${
+                          tool.enabled
+                            ? "border-primary/40 bg-primary/5 dark:bg-primary/10"
+                            : "border-slate-200 dark:border-gray-700 bg-slate-50/50 dark:bg-gray-800/50"
+                        }`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 min-w-0 mr-3">
+                            <p className="text-sm font-bold text-slate-900 dark:text-gray-100">{tool.name}</p>
+                            <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{tool.description}</p>
+                          </div>
+                          <button
+                            onClick={() => handleToggleTool(tool.name, !tool.enabled)}
+                            className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${tool.enabled ? "bg-primary" : "bg-slate-300 dark:bg-gray-600"}`}
+                          >
+                            <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${tool.enabled ? "left-[22px]" : "left-0.5"}`} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {/* ===== ANONYMIZATION TAB ===== */}
             {activeTab === "anonymization" && (
               <div className="space-y-8">
                 {/* Detection Engine */}
                 <section>
-                  <h2 className="text-lg font-bold text-slate-900 mb-1">Motor de Deteccion</h2>
-                  <p className="text-sm text-slate-500 mb-4">Selecciona el motor que analiza texto en busca de datos personales (PII).</p>
+                  <h2 className={h2Cls}>Motor de Deteccion</h2>
+                  <p className={`${descCls} mb-4`}>Selecciona el motor que analiza texto en busca de datos personales (PII).</p>
                   <div className="space-y-3">
                     {[
                       { id: "regex", title: "Solo Regex", desc: "Patrones regex para email, DNI, IBAN, IP, telefonos y nombres espanoles. Rapido, sin dependencias externas.", icon: "Rx" },
@@ -377,13 +765,13 @@ export default function ConfigPage() {
                       <label key={opt.id}
                         className={`flex items-start gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
                           detectorType === opt.id
-                            ? "border-primary bg-primary/5 shadow-sm"
+                            ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
                             : opt.requiresPresidio && !presidioAvailable
-                              ? "border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed"
-                              : "border-slate-200 bg-white hover:border-slate-300"
+                              ? "border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800 opacity-60 cursor-not-allowed"
+                              : "border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-slate-300 dark:hover:border-gray-600"
                         }`}>
                         <div className={`mt-0.5 w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${
-                          detectorType === opt.id ? "bg-primary text-white" : "bg-slate-100 text-slate-500"
+                          detectorType === opt.id ? "bg-primary text-white" : "bg-slate-100 dark:bg-gray-700 text-slate-500 dark:text-gray-400"
                         }`}>
                           {opt.icon}
                         </div>
@@ -393,18 +781,18 @@ export default function ConfigPage() {
                             disabled={opt.requiresPresidio && !presidioAvailable}
                             onChange={(e) => setDetectorType(e.target.value)} className="sr-only" />
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-900">{opt.title}</p>
+                            <p className="text-sm font-semibold text-slate-900 dark:text-gray-100">{opt.title}</p>
                             {opt.requiresPresidio && !presidioAvailable && (
-                              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 text-amber-700 rounded">NO INSTALADO</span>
+                              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">NO INSTALADO</span>
                             )}
                             {detectorType === opt.id && activeDetector === opt.id && (
-                              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-green-100 text-green-700 rounded">ACTIVO</span>
+                              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 rounded">ACTIVO</span>
                             )}
                           </div>
-                          <p className="text-xs text-slate-500 mt-0.5">{opt.desc}</p>
+                          <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{opt.desc}</p>
                         </div>
                         <div className={`mt-1 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                          detectorType === opt.id ? "border-primary bg-primary" : "border-slate-300"
+                          detectorType === opt.id ? "border-primary bg-primary" : "border-slate-300 dark:border-gray-600"
                         }`}>
                           {detectorType === opt.id && <IconCheck />}
                         </div>
@@ -412,9 +800,9 @@ export default function ConfigPage() {
                     ))}
                   </div>
                   {!presidioAvailable && (
-                    <div className="mt-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <p className="text-xs text-amber-800 font-medium">Presidio no esta instalado. Para habilitarlo:</p>
-                      <code className="block mt-1 text-[11px] text-amber-700 bg-amber-100/50 px-2 py-1 rounded font-mono">
+                    <div className="mt-3 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                      <p className="text-xs text-amber-800 dark:text-amber-300 font-medium">Presidio no esta instalado. Para habilitarlo:</p>
+                      <code className="block mt-1 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/30 px-2 py-1 rounded font-mono">
                         pip install presidio-analyzer &amp;&amp; python -m spacy download es_core_news_lg
                       </code>
                     </div>
@@ -423,18 +811,18 @@ export default function ConfigPage() {
 
                 {/* PII Rules */}
                 <section>
-                  <h2 className="text-lg font-bold text-slate-900 mb-1">Reglas de PII</h2>
-                  <p className="text-sm text-slate-500 mb-4">Configura que tipos de datos personales se detectan y anonimizan automaticamente.</p>
-                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <h2 className={h2Cls}>Reglas de PII</h2>
+                  <p className={`${descCls} mb-4`}>Configura que tipos de datos personales se detectan y anonimizan automaticamente.</p>
+                  <div className={`${cardCls} overflow-hidden`}>
                     {PII_RULES_META.map((rule) => (
-                      <div key={rule.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
+                      <div key={rule.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-gray-700 last:border-0 hover:bg-slate-50/50 dark:hover:bg-gray-700/50 transition-colors">
                         <div className="flex items-center gap-3">
-                          <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-500 rounded uppercase">{rule.category}</span>
-                          <span className="text-sm text-slate-800">{rule.label}</span>
+                          <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 dark:bg-gray-700 text-slate-500 dark:text-gray-400 rounded uppercase">{rule.category}</span>
+                          <span className="text-sm text-slate-800 dark:text-gray-200">{rule.label}</span>
                         </div>
                         <button
                           onClick={() => setPiiStates((s) => ({ ...s, [rule.id]: !s[rule.id] }))}
-                          className={`relative w-10 h-5 rounded-full transition-colors ${piiStates[rule.id] ? "bg-primary" : "bg-slate-300"}`}
+                          className={`relative w-10 h-5 rounded-full transition-colors ${piiStates[rule.id] ? "bg-primary" : "bg-slate-300 dark:bg-gray-600"}`}
                         >
                           <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${piiStates[rule.id] ? "left-[22px]" : "left-0.5"}`} />
                         </button>
@@ -445,8 +833,8 @@ export default function ConfigPage() {
 
                 {/* Substitution Technique */}
                 <section>
-                  <h2 className="text-lg font-bold text-slate-900 mb-1">Tecnica de Sustitucion</h2>
-                  <p className="text-sm text-slate-500 mb-4">Elige como se reemplazan los datos personales detectados.</p>
+                  <h2 className={h2Cls}>Tecnica de Sustitucion</h2>
+                  <p className={`${descCls} mb-4`}>Elige como se reemplazan los datos personales detectados.</p>
                   <div className="space-y-3">
                     {[
                       { id: "redacted", title: "Redaccion total (REDACTED)", desc: "Reemplaza todos los datos con [REDACTED]. Mascarado estatico sin contexto." },
@@ -456,19 +844,19 @@ export default function ConfigPage() {
                       <label key={opt.id}
                         className={`flex items-start gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
                           substitutionTechnique === opt.id
-                            ? "border-primary bg-primary/5 shadow-sm"
-                            : "border-slate-200 bg-white hover:border-slate-300"
+                            ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
+                            : "border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-slate-300 dark:hover:border-gray-600"
                         }`}>
                         <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                          substitutionTechnique === opt.id ? "border-primary bg-primary" : "border-slate-300"
+                          substitutionTechnique === opt.id ? "border-primary bg-primary" : "border-slate-300 dark:border-gray-600"
                         }`}>
                           {substitutionTechnique === opt.id && <IconCheck />}
                         </div>
                         <div>
                           <input type="radio" name="technique" value={opt.id} checked={substitutionTechnique === opt.id}
                             onChange={(e) => setSubstitutionTechnique(e.target.value)} className="sr-only" />
-                          <p className="text-sm font-semibold text-slate-900">{opt.title}</p>
-                          <p className="text-xs text-slate-500 mt-0.5">{opt.desc}</p>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-gray-100">{opt.title}</p>
+                          <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{opt.desc}</p>
                         </div>
                       </label>
                     ))}
@@ -477,17 +865,17 @@ export default function ConfigPage() {
 
                 {/* AI Sensitivity */}
                 <section>
-                  <h2 className="text-lg font-bold text-slate-900 mb-1">Nivel de Sensibilidad</h2>
-                  <p className="text-sm text-slate-500 mb-4">Ajusta el umbral de deteccion. Mayor sensibilidad = mas detecciones pero posibles falsos positivos.</p>
-                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                  <h2 className={h2Cls}>Nivel de Sensibilidad</h2>
+                  <p className={`${descCls} mb-4`}>Ajusta el umbral de deteccion. Mayor sensibilidad = mas detecciones pero posibles falsos positivos.</p>
+                  <div className={`${cardCls} p-6`}>
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-bold text-slate-400 uppercase">Conservador</span>
+                      <span className="text-xs font-bold text-slate-400 dark:text-gray-500 uppercase">Conservador</span>
                       <span className={`text-sm font-bold ${sensitivityColor}`}>{sensitivityLabel} ({sensitivity}%)</span>
-                      <span className="text-xs font-bold text-slate-400 uppercase">Agresivo</span>
+                      <span className="text-xs font-bold text-slate-400 dark:text-gray-500 uppercase">Agresivo</span>
                     </div>
                     <input type="range" min="0" max="100" value={sensitivity} onChange={(e) => setSensitivity(Number(e.target.value))}
-                      className="w-full h-2 bg-slate-200 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
-                    <p className="text-xs text-slate-500 mt-3 leading-relaxed">
+                      className="w-full h-2 bg-slate-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
+                    <p className="text-xs text-slate-500 dark:text-gray-400 mt-3 leading-relaxed">
                       {detectorType === "presidio" || detectorType === "composite"
                         ? `Con Presidio activo, el umbral de confianza del modelo NLP se ajusta al ${sensitivity}%. Valores altos detectan mas entidades pero pueden generar falsos positivos.`
                         : `El motor Regex usa patrones deterministas. La sensibilidad afecta heuristicas de nombres (${sensitivity}% umbral de coincidencia).`
@@ -499,30 +887,27 @@ export default function ConfigPage() {
                 {/* Save button */}
                 <div className="flex items-center justify-end gap-3">
                   {anonSaved && (
-                    <span className="text-sm font-medium text-green-600 flex items-center gap-1">
+                    <span className="text-sm font-medium text-green-600 dark:text-green-400 flex items-center gap-1">
                       <IconCheck /> Guardado
                     </span>
                   )}
-                  <button
-                    onClick={handleSaveAnonymization}
-                    disabled={anonSaving}
-                    className="px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50"
-                  >
+                  <button onClick={handleSaveAnonymization} disabled={anonSaving} className={btnPrimary}>
                     {anonSaving ? "Guardando..." : "Guardar configuracion"}
                   </button>
                 </div>
               </div>
             )}
 
+            {/* ===== INTEGRATIONS TAB ===== */}
             {activeTab === "integrations" && (
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900 mb-1">Sistemas Conectados</h2>
-                  <p className="text-sm text-slate-500">Gestiona las integraciones con sistemas de ticketing externos.</p>
+                  <h2 className={h2Cls}>Sistemas Conectados</h2>
+                  <p className={descCls}>Gestiona las integraciones con sistemas de ticketing externos.</p>
                 </div>
                 <div className="space-y-3">
                   {integrations.map((sys) => (
-                    <div key={sys.system_name} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div key={sys.system_name} className={cardCls + " overflow-hidden"}>
                       <div className="p-5 flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${systemBgColor(sys.system_name)}`}>
@@ -530,12 +915,12 @@ export default function ConfigPage() {
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="text-sm font-bold text-slate-900">{sys.display_name}</p>
+                              <p className="text-sm font-bold text-slate-900 dark:text-gray-100">{sys.display_name}</p>
                               <span className={`w-2 h-2 rounded-full ${statusDot(sys.last_connection_status)}`} />
-                              {sys.is_mock && <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 text-amber-700 rounded">MOCK</span>}
-                              {!sys.is_active && <span className="px-1.5 py-0.5 text-[9px] font-bold bg-slate-100 text-slate-500 rounded">INACTIVO</span>}
+                              {sys.is_mock && <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">MOCK</span>}
+                              {!sys.is_active && <span className="px-1.5 py-0.5 text-[9px] font-bold bg-slate-100 dark:bg-gray-700 text-slate-500 dark:text-gray-400 rounded">INACTIVO</span>}
                             </div>
-                            <p className="text-xs text-slate-500">
+                            <p className="text-xs text-slate-500 dark:text-gray-400">
                               {timeAgo(sys.last_connection_test)} · {sys.connector_type.toUpperCase()}
                               {sys.base_url ? ` · ${sys.base_url.replace(/https?:\/\//, "").split("/")[0]}` : ""}
                             </p>
@@ -556,7 +941,7 @@ export default function ConfigPage() {
                           </button>
                           <button
                             onClick={() => handleExpand(sys.system_name)}
-                            className="px-3 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                            className="px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-gray-400 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-700 transition-colors"
                           >
                             {expandedSystem === sys.system_name ? "Cerrar" : "Gestionar"}
                           </button>
@@ -567,8 +952,8 @@ export default function ConfigPage() {
                       {testResult[sys.system_name] && (
                         <div className={`mx-5 mb-3 px-3 py-2 rounded-lg text-xs font-medium ${
                           testResult[sys.system_name].status === "connected"
-                            ? "bg-green-50 text-green-700 border border-green-200"
-                            : "bg-red-50 text-red-700 border border-red-200"
+                            ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800"
+                            : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800"
                         }`}>
                           {testResult[sys.system_name].message}
                         </div>
@@ -576,125 +961,89 @@ export default function ConfigPage() {
 
                       {/* Expanded edit panel */}
                       {expandedSystem === sys.system_name && (
-                        <div className="border-t border-slate-200 p-5 bg-slate-50/50 space-y-4">
+                        <div className="border-t border-slate-200 dark:border-gray-700 p-5 bg-slate-50/50 dark:bg-gray-900/50 space-y-4">
                           <div className="grid grid-cols-2 gap-4">
                             <div>
-                              <label className="block text-xs font-semibold text-slate-700 mb-1">URL Base</label>
-                              <input
-                                type="text"
-                                value={String(editForm.base_url || "")}
+                              <label className={labelCls}>URL Base</label>
+                              <input type="text" value={String(editForm.base_url || "")}
                                 onChange={(e) => setEditForm((f) => ({ ...f, base_url: e.target.value }))}
-                                placeholder="https://..."
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                              />
+                                placeholder="https://..." className={inputCls} />
                             </div>
                             <div>
-                              <label className="block text-xs font-semibold text-slate-700 mb-1">Token (dejar vacio para mantener actual)</label>
-                              <input
-                                type="password"
-                                value={String(editForm.auth_token || "")}
+                              <label className={labelCls}>Token (dejar vacio para mantener actual)</label>
+                              <input type="password" value={String(editForm.auth_token || "")}
                                 onChange={(e) => setEditForm((f) => ({ ...f, auth_token: e.target.value }))}
-                                placeholder={sys.auth_token_masked}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                              />
+                                placeholder={sys.auth_token_masked} className={inputCls} />
                             </div>
                             <div>
-                              <label className="block text-xs font-semibold text-slate-700 mb-1">Email</label>
-                              <input
-                                type="email"
-                                value={String(editForm.auth_email || "")}
+                              <label className={labelCls}>Email</label>
+                              <input type="email" value={String(editForm.auth_email || "")}
                                 onChange={(e) => setEditForm((f) => ({ ...f, auth_email: e.target.value }))}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                              />
+                                className={inputCls} />
                             </div>
                             <div>
-                              <label className="block text-xs font-semibold text-slate-700 mb-1">Proyecto</label>
-                              <input
-                                type="text"
-                                value={String(editForm.project_key || "")}
+                              <label className={labelCls}>Proyecto</label>
+                              <input type="text" value={String(editForm.project_key || "")}
                                 onChange={(e) => setEditForm((f) => ({ ...f, project_key: e.target.value }))}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                              />
+                                className={inputCls} />
                             </div>
                           </div>
 
                           {sys.connector_type === "jira" && (
                             <div className="grid grid-cols-3 gap-4">
                               <div>
-                                <label className="block text-xs font-semibold text-slate-700 mb-1">Board ID</label>
-                                <input
-                                  type="text"
-                                  value={String(editForm.board_id || "")}
+                                <label className={labelCls}>Board ID</label>
+                                <input type="text" value={String(editForm.board_id || "")}
                                   onChange={(e) => setEditForm((f) => ({ ...f, board_id: e.target.value }))}
-                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                />
+                                  className={inputCls} />
                               </div>
                               <div>
-                                <label className="block text-xs font-semibold text-slate-700 mb-1">Issue Type ID</label>
-                                <input
-                                  type="text"
-                                  value={String(editForm.issue_type_id || "")}
+                                <label className={labelCls}>Issue Type ID</label>
+                                <input type="text" value={String(editForm.issue_type_id || "")}
                                   onChange={(e) => setEditForm((f) => ({ ...f, issue_type_id: e.target.value }))}
-                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                />
+                                  className={inputCls} />
                               </div>
                               <div>
-                                <label className="block text-xs font-semibold text-slate-700 mb-1">Parent Key</label>
-                                <input
-                                  type="text"
-                                  value={String(editForm.parent_key || "")}
+                                <label className={labelCls}>Parent Key</label>
+                                <input type="text" value={String(editForm.parent_key || "")}
                                   onChange={(e) => setEditForm((f) => ({ ...f, parent_key: e.target.value }))}
-                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                />
+                                  className={inputCls} />
                               </div>
                             </div>
                           )}
 
                           <div className="grid grid-cols-3 gap-4">
                             <div>
-                              <label className="block text-xs font-semibold text-slate-700 mb-1">Polling (seg)</label>
-                              <input
-                                type="number"
-                                min={5}
+                              <label className={labelCls}>Polling (seg)</label>
+                              <input type="number" min={5}
                                 value={Number(editForm.polling_interval_sec || 60)}
                                 onChange={(e) => setEditForm((f) => ({ ...f, polling_interval_sec: Number(e.target.value) }))}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                              />
+                                className={inputCls} />
                             </div>
                             <div className="flex items-end gap-4">
                               <label className="flex items-center gap-2 cursor-pointer">
-                                <button
-                                  onClick={() => setEditForm((f) => ({ ...f, is_active: !f.is_active }))}
-                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_active ? "bg-primary" : "bg-slate-300"}`}
-                                >
+                                <button onClick={() => setEditForm((f) => ({ ...f, is_active: !f.is_active }))}
+                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_active ? "bg-primary" : "bg-slate-300 dark:bg-gray-600"}`}>
                                   <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_active ? "left-[22px]" : "left-0.5"}`} />
                                 </button>
-                                <span className="text-xs font-semibold text-slate-700">Activo</span>
+                                <span className="text-xs font-semibold text-slate-700 dark:text-gray-300">Activo</span>
                               </label>
                               <label className="flex items-center gap-2 cursor-pointer">
-                                <button
-                                  onClick={() => setEditForm((f) => ({ ...f, is_mock: !f.is_mock }))}
-                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_mock ? "bg-amber-400" : "bg-slate-300"}`}
-                                >
+                                <button onClick={() => setEditForm((f) => ({ ...f, is_mock: !f.is_mock }))}
+                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_mock ? "bg-amber-400" : "bg-slate-300 dark:bg-gray-600"}`}>
                                   <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_mock ? "left-[22px]" : "left-0.5"}`} />
                                 </button>
-                                <span className="text-xs font-semibold text-slate-700">Mock</span>
+                                <span className="text-xs font-semibold text-slate-700 dark:text-gray-300">Mock</span>
                               </label>
                             </div>
                           </div>
 
                           <div className="flex justify-end gap-2 pt-2">
-                            <button
-                              onClick={() => setExpandedSystem(null)}
-                              className="px-4 py-2 text-sm font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-white transition-colors"
-                            >
+                            <button onClick={() => setExpandedSystem(null)}
+                              className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-gray-400 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-white dark:hover:bg-gray-700 transition-colors">
                               Cancelar
                             </button>
-                            <button
-                              onClick={() => handleSave(sys.system_name)}
-                              disabled={saving}
-                              className="px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50"
-                            >
+                            <button onClick={() => handleSave(sys.system_name)} disabled={saving} className={btnPrimary}>
                               {saving ? "Guardando..." : "Guardar"}
                             </button>
                           </div>
@@ -703,66 +1052,25 @@ export default function ConfigPage() {
                     </div>
                   ))}
                   {integrations.length === 0 && (
-                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-10 text-center">
-                      <p className="text-sm text-slate-500">Cargando integraciones...</p>
+                    <div className={`${cardCls} p-10 text-center`}>
+                      <p className={descCls}>Cargando integraciones...</p>
                     </div>
                   )}
                 </div>
               </div>
             )}
 
-            {activeTab === "general" && (
-              <div className="space-y-6">
-                <h2 className="text-lg font-bold text-slate-900 mb-1">Configuracion General</h2>
-                <p className="text-sm text-slate-500">Parametros generales de la plataforma.</p>
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Proveedor LLM</label>
-                    <select className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
-                      <option>Azure OpenAI (Produccion GDPR)</option>
-                      <option>Ollama (Desarrollo local)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Modelo</label>
-                    <select className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
-                      <option>gpt-4o-mini</option>
-                      <option>gpt-4o</option>
-                      <option>llama3.1:8b</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Intervalo de refresco del board (seg)</label>
-                    <input
-                      type="number"
-                      min={5}
-                      value={generalLoaded ? pollingInterval : 60}
-                      onChange={(e) => setPollingInterval(Number(e.target.value))}
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    onClick={handleSaveGeneral}
-                    className="px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20"
-                  >
-                    Guardar configuracion
-                  </button>
-                </div>
-              </div>
-            )}
-
+            {/* ===== TICKETS TAB ===== */}
             {activeTab === "tickets" && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-lg font-bold text-slate-900 mb-1">Gestion de Tickets</h2>
-                    <p className="text-sm text-slate-500">Administra los tickets ingestados. Puedes eliminar tickets y sus datos asociados.</p>
+                    <h2 className={h2Cls}>Gestion de Tickets</h2>
+                    <p className={descCls}>Administra los tickets ingestados. Puedes eliminar tickets y sus datos asociados.</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs text-slate-500">{adminTickets.length} ticket{adminTickets.length !== 1 ? "s" : ""}</span>
-                    <button onClick={fetchAdminTickets} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors" title="Refrescar">
+                    <span className="text-xs text-slate-500 dark:text-gray-400">{adminTickets.length} ticket{adminTickets.length !== 1 ? "s" : ""}</span>
+                    <button onClick={fetchAdminTickets} className="p-2 text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Refrescar">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                       </svg>
@@ -772,55 +1080,55 @@ export default function ConfigPage() {
                 {adminLoading ? (
                   <div className="text-center py-20">
                     <div className="w-10 h-10 mx-auto border-[3px] border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
-                    <p className="text-sm text-slate-500">Cargando tickets...</p>
+                    <p className={descCls}>Cargando tickets...</p>
                   </div>
                 ) : adminTickets.length === 0 ? (
-                  <div className="text-center py-16 bg-white rounded-xl border border-slate-200 shadow-sm">
+                  <div className={`${cardCls} text-center py-16`}>
                     <div className="w-14 h-14 mx-auto mb-4 bg-primary/5 rounded-2xl flex items-center justify-center border border-primary/10">
                       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
                         <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
                       </svg>
                     </div>
-                    <p className="text-sm font-semibold text-slate-900 mb-1">No hay tickets ingestados</p>
-                    <p className="text-xs text-slate-500">Los tickets apareceran aqui una vez ingestados desde la vista de Incidencias</p>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-gray-100 mb-1">No hay tickets ingestados</p>
+                    <p className="text-xs text-slate-500 dark:text-gray-400">Los tickets apareceran aqui una vez ingestados desde la vista de Incidencias</p>
                   </div>
                 ) : (
-                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className={`${cardCls} overflow-hidden`}>
                     <table className="w-full">
                       <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50">
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">KOSIN Key</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Origen</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Source Key</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Resumen</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Prioridad</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Estado</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Creado</th>
-                          <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Accion</th>
+                        <tr className="border-b border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800">
+                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">KOSIN Key</th>
+                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Origen</th>
+                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Source Key</th>
+                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Resumen</th>
+                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Prioridad</th>
+                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Estado</th>
+                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Creado</th>
+                          <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Accion</th>
                         </tr>
                       </thead>
                       <tbody>
                         {adminTickets.map((t) => {
-                          const pr = priorityConfig[t.priority] || { bg: "bg-slate-100", text: "text-slate-600", label: t.priority };
-                          const st = statusConfig[t.status] || { bg: "bg-slate-100", text: "text-slate-600", label: t.status };
+                          const pr = priorityConfig[t.priority] || { bg: "bg-slate-100 dark:bg-gray-700", text: "text-slate-600 dark:text-gray-300", label: t.priority };
+                          const st = statusConfig[t.status] || { bg: "bg-slate-100 dark:bg-gray-700", text: "text-slate-600 dark:text-gray-300", label: t.status };
                           return (
-                            <tr key={t.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                            <tr key={t.id} className="border-b border-slate-100 dark:border-gray-700 hover:bg-slate-50/50 dark:hover:bg-gray-800/50 transition-colors">
                               <td className="px-4 py-3 text-sm font-semibold text-primary">{t.kosin_ticket_id}</td>
                               <td className="px-4 py-3">
-                                <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-600 rounded uppercase">{t.source_system}</span>
+                                <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-300 rounded uppercase">{t.source_system}</span>
                               </td>
-                              <td className="px-4 py-3 text-sm text-slate-600">{t.source_ticket_id}</td>
-                              <td className="px-4 py-3 text-sm text-slate-800 max-w-[300px] truncate">{t.summary}</td>
+                              <td className="px-4 py-3 text-sm text-slate-600 dark:text-gray-400">{t.source_ticket_id}</td>
+                              <td className="px-4 py-3 text-sm text-slate-800 dark:text-gray-200 max-w-[300px] truncate">{t.summary}</td>
                               <td className="px-4 py-3">
                                 <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${pr.bg} ${pr.text}`}>{pr.label}</span>
                               </td>
                               <td className="px-4 py-3">
                                 <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
                               </td>
-                              <td className="px-4 py-3 text-xs text-slate-500">{new Date(t.created_at).toLocaleDateString("es-ES")}</td>
+                              <td className="px-4 py-3 text-xs text-slate-500 dark:text-gray-400">{new Date(t.created_at).toLocaleDateString("es-ES")}</td>
                               <td className="px-4 py-3 text-right">
                                 <button onClick={() => setConfirmDelete(t.kosin_ticket_id)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
                                   <IconTrash />
                                   Eliminar
                                 </button>
@@ -841,28 +1149,28 @@ export default function ConfigPage() {
       {/* Delete confirmation modal */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-6 max-w-sm w-full mx-4">
+          <div className={`${cardCls} shadow-2xl p-6 max-w-sm w-full mx-4`}>
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
                 <IconTrash />
               </div>
               <div>
-                <p className="text-sm font-bold text-slate-900">Eliminar ticket</p>
-                <p className="text-xs text-slate-500">Esta accion no se puede deshacer</p>
+                <p className="text-sm font-bold text-slate-900 dark:text-gray-100">Eliminar ticket</p>
+                <p className="text-xs text-slate-500 dark:text-gray-400">Esta accion no se puede deshacer</p>
               </div>
             </div>
-            <p className="text-sm text-slate-700 mb-1">
+            <p className="text-sm text-slate-700 dark:text-gray-300 mb-1">
               Se eliminara <span className="font-semibold text-primary">{confirmDelete}</span> de KOSIN y de la base de datos, incluyendo historial de chat y mapa de sustitucion.
             </p>
             {deleteError && (
-              <div className="mt-3 px-3 py-2 bg-red-50 text-red-700 text-xs font-medium rounded-lg border border-red-200">
+              <div className="mt-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-xs font-medium rounded-lg border border-red-200 dark:border-red-800">
                 {deleteError}
               </div>
             )}
             <div className="flex justify-end gap-2 mt-5">
               <button
                 onClick={() => { setConfirmDelete(null); setDeleteError(null); }}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-gray-400 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-700 transition-colors"
               >
                 Cancelar
               </button>
