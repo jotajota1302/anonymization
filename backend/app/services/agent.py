@@ -231,8 +231,16 @@ class AnonymizationAgent:
                 temperature=temperature,
                 streaming=True,
             )
+        elif provider == "openai":
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                api_key=kwargs.get("openai_api_key", settings.openai_api_key),
+                model=model or settings.openai_model,
+                temperature=temperature,
+                streaming=True,
+            )
         else:
-            raise ValueError(f"Unknown LLM provider: {provider}. Use 'ollama' or 'azure'")
+            raise ValueError(f"Unknown LLM provider: {provider}. Use 'ollama', 'azure', or 'openai'")
 
     def update_llm(self, provider: str, model: str, temperature: float = 0.3, **kwargs):
         """Hot-reload: recreate the LLM instance with new config."""

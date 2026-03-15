@@ -245,7 +245,7 @@ async def _get_agent_config(db) -> dict:
             return raw
     defaults = {
         "provider": s.llm_provider,
-        "model": s.ollama_model if s.llm_provider == "ollama" else s.azure_openai_deployment,
+        "model": s.ollama_model if s.llm_provider == "ollama" else (s.openai_model if s.llm_provider == "openai" else s.azure_openai_deployment),
         "temperature": 0.3,
         "tools": {t["name"]: True for t in _ALL_TOOLS_META},
     }
@@ -280,11 +280,16 @@ async def get_agent_config():
         "model": config.get("model", s.ollama_model),
         "temperature": config.get("temperature", 0.3),
         "system_prompt": state.get("system_prompt", ""),
-        "available_providers": ["ollama", "azure"],
+        "available_providers": ["ollama", "openai", "azure"],
         "tools": tools_list,
         "ollama_config": {
             "base_url": s.ollama_base_url,
             "available_models": [],
+        },
+        "openai_config": {
+            "api_key_masked": _mask_token(s.openai_api_key),
+            "model": s.openai_model,
+            "available_models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
         },
         "azure_config": {
             "endpoint_masked": _mask_token(s.azure_openai_endpoint),
@@ -383,6 +388,77 @@ async def update_agent_tools(body: AgentToolsUpdate):
 async def get_default_prompt():
     from ..services.agent import DEFAULT_SYSTEM_PROMPT
     return {"system_prompt": DEFAULT_SYSTEM_PROMPT}
+
+
+class TestConnectionRequest(BaseModel):
+    provider: str
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    azure_endpoint: Optional[str] = None
+    azure_deployment: Optional[str] = None
+    azure_api_key: Optional[str] = None
+    azure_api_version: Optional[str] = None
+
+
+@router.post("/agent/test-connection")
+async def test_agent_connection(body: TestConnectionRequest):
+    """Test LLM connection with given provider config."""
+    from ..services.agent import AnonymizationAgent
+    from ..config import settings as s
+
+    try:
+        kwargs = {}
+        model = body.model
+
+        if body.provider == "openai":
+            kwargs["openai_api_key"] = body.api_key or s.openai_api_key
+            model = model or s.openai_model
+        elif body.provider == "azure":
+            kwargs["azure_endpoint"] = body.azure_endpoint or s.azure_openai_endpoint
+            kwargs["azure_api_key"] = body.azure_api_key or s.azure_openai_key
+            kwargs["azure_deployment"] = body.azure_deployment or s.azure_openai_deployment
+            kwargs["azure_api_version"] = body.azure_api_version or s.azure_openai_api_version
+            model = model or s.azure_openai_deployment
+        elif body.provider == "ollama":
+            kwargs["ollama_base_url"] = body.ollama_base_url or s.ollama_base_url
+            model = model or s.ollama_model
+
+        llm = AnonymizationAgent._create_llm(
+            provider=body.provider,
+            model=model,
+            temperature=0.1,
+            **kwargs,
+        )
+
+        # Send a simple test message
+        from langchain_core.messages import HumanMessage
+        response = await llm.ainvoke([HumanMessage(content="Responde solo: OK")])
+        content = response.content if hasattr(response, "content") else str(response)
+
+        return {"success": True, "message": f"Conexion exitosa con {body.provider}/{model}", "response": content[:100]}
+    except Exception as e:
+        return {"success": False, "message": f"Error de conexion: {str(e)}"}
+
+
+class UpdateApiKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+
+
+@router.put("/agent/api-key")
+async def update_agent_api_key(body: UpdateApiKeyRequest):
+    """Update API key for a provider (runtime only, does not persist to .env)."""
+    from ..config import settings as s
+
+    if body.provider == "openai":
+        s.openai_api_key = body.api_key
+    elif body.provider == "azure":
+        s.azure_openai_key = body.api_key
+    else:
+        raise HTTPException(status_code=400, detail=f"Provider '{body.provider}' no soporta API key")
+
+    return {"success": True, "message": f"API key actualizada para {body.provider}"}
 
 
 # --- Anonymization settings endpoints ---

@@ -44,6 +44,7 @@ export interface AgentConfig {
   available_providers: string[];
   tools: AgentTool[];
   ollama_config?: { base_url: string; available_models: string[] };
+  openai_config?: { api_key_masked: string; model: string; available_models: string[] };
   azure_config?: { endpoint_masked: string; deployment: string; api_version: string };
 }
 

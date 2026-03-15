@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     # Database
     db_path: str = Field(default="data/ticketing.db", description="SQLite database path")
 
-    # LLM Provider: "ollama" or "azure"
-    llm_provider: str = Field(default="ollama", description="LLM provider: 'ollama' or 'azure'")
+    # LLM Provider: "ollama", "azure", or "openai"
+    llm_provider: str = Field(default="ollama", description="LLM provider: 'ollama', 'azure', or 'openai'")
 
     # Ollama
     ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama server URL")
@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     azure_openai_key: str = Field(default="", description="Azure OpenAI API key")
     azure_openai_deployment: str = Field(default="gpt-4", description="Azure OpenAI deployment name")
     azure_openai_api_version: str = Field(default="2024-02-15-preview", description="Azure OpenAI API version")
+
+    # OpenAI (direct API, not Azure)
+    openai_api_key: str = Field(default="", description="OpenAI API key")
+    openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
 
     # Jira / KOSIN (same instance for POC)
     # For POC: same Jira acts as source (read real tickets) and destination (create anonymized copies)

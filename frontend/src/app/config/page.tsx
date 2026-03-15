@@ -158,6 +158,9 @@ export default function ConfigPage() {
   const [agentSaved, setAgentSaved] = useState(false);
   const [promptSaving, setPromptSaving] = useState(false);
   const [promptSaved, setPromptSaved] = useState(false);
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Admin tickets state
   const [adminTickets, setAdminTickets] = useState<AdminTicket[]>([]);
@@ -568,23 +571,35 @@ export default function ConfigPage() {
                   <p className={`${descCls} mb-4`}>Configura el LLM que usa el agente de anonimizacion.</p>
 
                   {/* Provider radio cards */}
-                  <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="grid grid-cols-3 gap-3 mb-4">
                     {[
-                      { id: "ollama", title: "Ollama", desc: "Desarrollo local", color: "green" },
-                      { id: "azure", title: "Azure OpenAI", desc: "Produccion GDPR", color: "blue" },
+                      { id: "ollama", title: "Ollama", desc: "Desarrollo local", bgColor: "bg-green-600" },
+                      { id: "openai", title: "OpenAI", desc: "API directa GPT", bgColor: "bg-slate-800 dark:bg-slate-600" },
+                      { id: "azure", title: "Azure OpenAI", desc: "Produccion GDPR", bgColor: "bg-blue-600" },
                     ].map((p) => (
-                      <button key={p.id} onClick={() => setAgentProvider(p.id)}
+                      <button key={p.id} onClick={() => {
+                        setAgentProvider(p.id);
+                        setConnectionResult(null);
+                        if (p.id === "ollama") {
+                          const models = agentConfig?.ollama_config?.available_models || [];
+                          setAgentModel(models[0] || "minimax-m2:cloud");
+                        } else if (p.id === "openai") {
+                          setAgentModel(agentConfig?.openai_config?.model || "gpt-4o-mini");
+                        } else if (p.id === "azure") {
+                          setAgentModel(agentConfig?.azure_config?.deployment || "gpt-4");
+                        }
+                      }}
                         className={`p-4 rounded-xl border text-left transition-all ${
                           agentProvider === p.id
                             ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
                             : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600"
                         }`}>
                         <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${
-                            p.id === "ollama" ? "bg-green-600" : "bg-blue-600"
-                          }`}>
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${p.bgColor}`}>
                             {p.id === "ollama" ? (
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="3"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="16" x2="13" y2="16"/></svg>
+                            ) : p.id === "openai" ? (
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z"/><path d="M8 12l2 2 4-4"/></svg>
                             ) : (
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>
                             )}
@@ -626,6 +641,49 @@ export default function ConfigPage() {
                           <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Configurado via variable de entorno OLLAMA_BASE_URL</p>
                         </div>
                       </>
+                    ) : agentProvider === "openai" ? (
+                      <>
+                        <div>
+                          <label className={labelCls}>Modelo</label>
+                          <select value={agentModel} onChange={(e) => setAgentModel(e.target.value)} className={inputCls}>
+                            {(agentConfig?.openai_config?.available_models || ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]).map((m: string) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={labelCls}>API Key</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="password"
+                              value={openaiApiKey}
+                              onChange={(e) => setOpenaiApiKey(e.target.value)}
+                              placeholder={agentConfig?.openai_config?.api_key_masked || "sk-..."}
+                              className={`${inputCls} flex-1`}
+                            />
+                            <button
+                              onClick={async () => {
+                                if (!openaiApiKey) return;
+                                try {
+                                  await fetch(`${API_URL}/api/config/agent/api-key`, {
+                                    method: "PUT",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ provider: "openai", api_key: openaiApiKey }),
+                                  });
+                                  setAgentSaved(true);
+                                  setTimeout(() => setAgentSaved(false), 2000);
+                                } catch {}
+                              }}
+                              className="px-3 py-2 text-xs font-bold text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shrink-0"
+                            >
+                              Aplicar
+                            </button>
+                          </div>
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                            {agentConfig?.openai_config?.api_key_masked ? "API key cargada desde .env" : "Introduce tu API key de OpenAI"}
+                          </p>
+                        </div>
+                      </>
                     ) : (
                       <>
                         <div>
@@ -662,12 +720,47 @@ export default function ConfigPage() {
                     </div>
                   </div>
 
+                  {/* Connection test result */}
+                  {connectionResult && (
+                    <div className={`mt-3 p-3 rounded-lg text-sm font-medium ${
+                      connectionResult.success
+                        ? "bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800"
+                        : "bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800"
+                    }`}>
+                      {connectionResult.success ? "✓" : "✗"} {connectionResult.message}
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-end gap-3 mt-4">
                     {agentSaved && (
                       <span className="text-sm font-medium text-green-600 dark:text-green-400 flex items-center gap-1">
                         <IconCheck /> Guardado
                       </span>
                     )}
+                    <button
+                      onClick={async () => {
+                        setTestingConnection(true);
+                        setConnectionResult(null);
+                        try {
+                          const payload: Record<string, string> = { provider: agentProvider, model: agentModel };
+                          if (agentProvider === "openai" && openaiApiKey) payload.api_key = openaiApiKey;
+                          const res = await fetch(`${API_URL}/api/config/agent/test-connection`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(payload),
+                          });
+                          const data = await res.json();
+                          setConnectionResult({ success: data.success, message: data.message });
+                        } catch (e) {
+                          setConnectionResult({ success: false, message: "Error de red al probar conexion" });
+                        }
+                        setTestingConnection(false);
+                      }}
+                      disabled={testingConnection}
+                      className="px-4 py-2 text-sm font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      {testingConnection ? "Probando..." : "Probar Conexion"}
+                    </button>
                     <button onClick={handleSaveAgentLLM} disabled={agentSaving} className={btnPrimary}>
                       {agentSaving ? "Guardando..." : "Guardar Configuracion LLM"}
                     </button>
