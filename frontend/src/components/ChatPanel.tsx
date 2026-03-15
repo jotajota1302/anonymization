@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/stores/appStore";
 import { ChatMessage } from "./ChatMessage";
-import { EscalationModal, EscalationData } from "./EscalationModal";
 import { BoardTicket } from "@/types";
 
 // Reusable SVG icons
@@ -72,7 +71,6 @@ interface Props {
 export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket, onSyncToClient, onCloseTicket, onConfirmIngest }: Props) {
   const [input, setInput] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
-  const [showEscalation, setShowEscalation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { chatMessages, streamingContent, isStreaming, isIngesting, tickets, suggestedChips } = useAppStore();
@@ -308,12 +306,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
                   <IconSync />
                   {isSyncing ? "Sincronizando..." : "Sincronizar con origen"}
                 </button>
-                <button onClick={() => setShowEscalation(true)}
-                  className="flex items-center gap-2 px-4 py-2 border-2 border-amber-500 text-amber-600 dark:text-amber-400 rounded-lg text-sm font-bold hover:bg-amber-500 hover:text-white transition-all">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
-                  Escalar
-                </button>
-                <button onClick={onFinishTicket}
+<button onClick={onFinishTicket}
                   className="flex items-center gap-2 px-4 py-2 border-2 border-primary text-primary rounded-lg text-sm font-bold hover:bg-primary hover:text-white transition-all">
                   Finalizar ticket
                 </button>
@@ -330,18 +323,6 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
         </div>
       </div>
 
-      {/* Escalation Modal */}
-      {ticket && (
-        <EscalationModal
-          ticketId={ticket.kosin_id}
-          open={showEscalation}
-          onClose={() => setShowEscalation(false)}
-          onConfirm={(data: EscalationData) => {
-            setShowEscalation(false);
-            onSendMessage(`[ESCALACION] Nivel: ${data.level}, Motivo: ${data.reason}${data.notes ? `, Notas: ${data.notes}` : ""}`);
-          }}
-        />
-      )}
     </div>
   );
 }
