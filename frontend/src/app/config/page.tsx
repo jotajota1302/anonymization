@@ -73,8 +73,8 @@ const priorityConfig: Record<string, { bg: string; text: string; label: string }
 const statusConfig: Record<string, { bg: string; text: string; label: string }> = {
   open: { bg: "bg-blue-100 dark:bg-blue-900/30", text: "text-blue-700 dark:text-blue-400", label: "Abierto" },
   in_progress: { bg: "bg-emerald-100 dark:bg-emerald-900/30", text: "text-emerald-700 dark:text-emerald-400", label: "En progreso" },
-  resolved: { bg: "bg-slate-100 dark:bg-gray-700", text: "text-slate-600 dark:text-gray-300", label: "Resuelto" },
-  closed: { bg: "bg-slate-100 dark:bg-gray-700", text: "text-slate-500 dark:text-gray-400", label: "Cerrado" },
+  resolved: { bg: "bg-slate-100 dark:bg-slate-700", text: "text-slate-600 dark:text-slate-300", label: "Resuelto" },
+  closed: { bg: "bg-slate-100 dark:bg-slate-700", text: "text-slate-500 dark:text-slate-400", label: "Cerrado" },
 };
 
 interface AdminTicket {
@@ -112,11 +112,11 @@ function systemBgColor(name: string): string {
 }
 
 // Shared CSS classes
-const cardCls = "bg-white dark:bg-gray-800 rounded-xl border border-slate-200 dark:border-gray-700 shadow-sm";
-const inputCls = "w-full px-3 py-2 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-lg text-sm text-slate-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-primary focus:border-transparent";
-const labelCls = "block text-xs font-semibold text-slate-700 dark:text-gray-300 mb-1";
-const h2Cls = "text-lg font-bold text-slate-900 dark:text-gray-100 mb-1";
-const descCls = "text-sm text-slate-500 dark:text-gray-400";
+const cardCls = "bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm";
+const inputCls = "w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-primary focus:border-transparent";
+const labelCls = "block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1";
+const h2Cls = "text-lg font-bold text-slate-900 dark:text-slate-100 mb-1";
+const descCls = "text-sm text-slate-500 dark:text-slate-400";
 const btnPrimary = "px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50";
 
 export default function ConfigPage() {
@@ -479,7 +479,7 @@ export default function ConfigPage() {
   const tempLabel = agentTemp <= 0.2 ? "Preciso" : agentTemp <= 0.5 ? "Equilibrado" : agentTemp <= 0.8 ? "Creativo" : "Experimental";
 
   return (
-    <div className="bg-[#F8FAFC] dark:bg-gray-900 text-slate-900 dark:text-gray-100 h-screen flex flex-col overflow-hidden">
+    <div className="bg-[#F8FAFC] dark:bg-slate-900 text-slate-900 dark:text-slate-100 h-screen flex flex-col overflow-hidden">
       <Header
         activePage="config"
         subheader={
@@ -494,14 +494,14 @@ export default function ConfigPage() {
       {/* Content */}
       <div className="flex-1 flex min-h-0">
         {/* Sidebar */}
-        <aside className="w-64 bg-white dark:bg-gray-800 border-r border-slate-200 dark:border-gray-700 p-4 shrink-0">
+        <aside className="w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 p-4 shrink-0">
           <div className="space-y-1">
             {tabs.map((tab) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   activeTab === tab.id
                     ? "bg-primary/10 text-primary border-r-2 border-primary"
-                    : "text-slate-600 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-gray-700"
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
                 }`}>
                 {tab.icon}
                 {tab.label}
@@ -526,12 +526,12 @@ export default function ConfigPage() {
                 <div className={`${cardCls} p-6`}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-gray-100">Modo oscuro</p>
-                      <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Cambia la apariencia de toda la interfaz</p>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Modo oscuro</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Cambia la apariencia de toda la interfaz</p>
                     </div>
                     <button
                       onClick={handleToggleDarkMode}
-                      className={`relative w-12 h-6 rounded-full transition-colors ${darkMode ? "bg-primary" : "bg-slate-300 dark:bg-gray-600"}`}
+                      className={`relative w-12 h-6 rounded-full transition-colors ${darkMode ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
                     >
                       <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${darkMode ? "left-[26px]" : "left-0.5"}`} />
                     </button>
@@ -577,7 +577,7 @@ export default function ConfigPage() {
                         className={`p-4 rounded-xl border text-left transition-all ${
                           agentProvider === p.id
                             ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
-                            : "border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-slate-300 dark:hover:border-gray-600"
+                            : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600"
                         }`}>
                         <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${
@@ -590,11 +590,11 @@ export default function ConfigPage() {
                             )}
                           </div>
                           <div>
-                            <p className="text-sm font-semibold text-slate-900 dark:text-gray-100">{p.title}</p>
-                            <p className="text-xs text-slate-500 dark:text-gray-400">{p.desc}</p>
+                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{p.title}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">{p.desc}</p>
                           </div>
                           <div className={`ml-auto w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                            agentProvider === p.id ? "border-primary bg-primary" : "border-slate-300 dark:border-gray-600"
+                            agentProvider === p.id ? "border-primary bg-primary" : "border-slate-300 dark:border-slate-600"
                           }`}>
                             {agentProvider === p.id && <IconCheck />}
                           </div>
@@ -617,13 +617,13 @@ export default function ConfigPage() {
                             )}
                           </select>
                           {ollamaModels.length === 0 && (
-                            <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">No se pudo conectar con Ollama para listar modelos</p>
+                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">No se pudo conectar con Ollama para listar modelos</p>
                           )}
                         </div>
                         <div>
                           <label className={labelCls}>URL Base Ollama</label>
                           <input type="text" value={agentConfig?.ollama_config?.base_url || ""} disabled className={`${inputCls} opacity-60`} />
-                          <p className="text-[11px] text-slate-400 dark:text-gray-500 mt-1">Configurado via variable de entorno OLLAMA_BASE_URL</p>
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Configurado via variable de entorno OLLAMA_BASE_URL</p>
                         </div>
                       </>
                     ) : (
@@ -642,7 +642,7 @@ export default function ConfigPage() {
                             <input type="text" value={agentConfig?.azure_config?.api_version || ""} disabled className={`${inputCls} opacity-60`} />
                           </div>
                         </div>
-                        <p className="text-[11px] text-slate-400 dark:text-gray-500">Endpoint y API key configurados via variables de entorno</p>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">Endpoint y API key configurados via variables de entorno</p>
                       </>
                     )}
 
@@ -654,8 +654,8 @@ export default function ConfigPage() {
                       </div>
                       <input type="range" min="0" max="1" step="0.1" value={agentTemp}
                         onChange={(e) => setAgentTemp(Number(e.target.value))}
-                        className="w-full h-2 bg-slate-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
-                      <div className="flex justify-between text-[10px] text-slate-400 dark:text-gray-500 mt-1">
+                        className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
+                      <div className="flex justify-between text-xs text-slate-400 dark:text-slate-500 mt-1">
                         <span>Preciso</span>
                         <span>Creativo</span>
                       </div>
@@ -680,9 +680,9 @@ export default function ConfigPage() {
                     <h2 className={h2Cls}>System Prompt</h2>
                     <div className="flex items-center gap-2">
                       {promptModified && (
-                        <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">MODIFICADO</span>
+                        <span className="px-2 py-0.5 text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">MODIFICADO</span>
                       )}
-                      <span className="text-xs text-slate-400 dark:text-gray-500">{agentPrompt.length} caracteres</span>
+                      <span className="text-xs text-slate-400 dark:text-slate-500">{agentPrompt.length} caracteres</span>
                     </div>
                   </div>
                   <p className={`${descCls} mb-4`}>El prompt del sistema define el comportamiento del agente. Los cambios se aplican inmediatamente.</p>
@@ -696,7 +696,7 @@ export default function ConfigPage() {
 
                   <div className="flex items-center justify-between mt-4">
                     <button onClick={handleRestoreDefaultPrompt}
-                      className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-gray-400 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-700 transition-colors">
+                      className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                       Restaurar por defecto
                     </button>
                     <div className="flex items-center gap-3">
@@ -728,16 +728,16 @@ export default function ConfigPage() {
                         className={`p-4 rounded-xl border transition-all ${
                           tool.enabled
                             ? "border-primary/40 bg-primary/5 dark:bg-primary/10"
-                            : "border-slate-200 dark:border-gray-700 bg-slate-50/50 dark:bg-gray-800/50"
+                            : "border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50"
                         }`}>
                         <div className="flex items-center justify-between">
                           <div className="flex-1 min-w-0 mr-3">
-                            <p className="text-sm font-bold text-slate-900 dark:text-gray-100">{tool.name}</p>
-                            <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{tool.description}</p>
+                            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{tool.name}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{tool.description}</p>
                           </div>
                           <button
                             onClick={() => handleToggleTool(tool.name, !tool.enabled)}
-                            className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${tool.enabled ? "bg-primary" : "bg-slate-300 dark:bg-gray-600"}`}
+                            className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${tool.enabled ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
                           >
                             <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${tool.enabled ? "left-[22px]" : "left-0.5"}`} />
                           </button>
@@ -767,11 +767,11 @@ export default function ConfigPage() {
                           detectorType === opt.id
                             ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
                             : opt.requiresPresidio && !presidioAvailable
-                              ? "border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800 opacity-60 cursor-not-allowed"
-                              : "border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-slate-300 dark:hover:border-gray-600"
+                              ? "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 opacity-60 cursor-not-allowed"
+                              : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600"
                         }`}>
                         <div className={`mt-0.5 w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${
-                          detectorType === opt.id ? "bg-primary text-white" : "bg-slate-100 dark:bg-gray-700 text-slate-500 dark:text-gray-400"
+                          detectorType === opt.id ? "bg-primary text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
                         }`}>
                           {opt.icon}
                         </div>
@@ -781,18 +781,18 @@ export default function ConfigPage() {
                             disabled={opt.requiresPresidio && !presidioAvailable}
                             onChange={(e) => setDetectorType(e.target.value)} className="sr-only" />
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-900 dark:text-gray-100">{opt.title}</p>
+                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{opt.title}</p>
                             {opt.requiresPresidio && !presidioAvailable && (
-                              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">NO INSTALADO</span>
+                              <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">NO INSTALADO</span>
                             )}
                             {detectorType === opt.id && activeDetector === opt.id && (
-                              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 rounded">ACTIVO</span>
+                              <span className="px-1.5 py-0.5 text-xs font-bold bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 rounded">ACTIVO</span>
                             )}
                           </div>
-                          <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{opt.desc}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{opt.desc}</p>
                         </div>
                         <div className={`mt-1 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                          detectorType === opt.id ? "border-primary bg-primary" : "border-slate-300 dark:border-gray-600"
+                          detectorType === opt.id ? "border-primary bg-primary" : "border-slate-300 dark:border-slate-600"
                         }`}>
                           {detectorType === opt.id && <IconCheck />}
                         </div>
@@ -802,7 +802,7 @@ export default function ConfigPage() {
                   {!presidioAvailable && (
                     <div className="mt-3 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
                       <p className="text-xs text-amber-800 dark:text-amber-300 font-medium">Presidio no esta instalado. Para habilitarlo:</p>
-                      <code className="block mt-1 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/30 px-2 py-1 rounded font-mono">
+                      <code className="block mt-1 text-xs text-amber-700 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/30 px-2 py-1 rounded font-mono">
                         pip install presidio-analyzer &amp;&amp; python -m spacy download es_core_news_lg
                       </code>
                     </div>
@@ -815,14 +815,14 @@ export default function ConfigPage() {
                   <p className={`${descCls} mb-4`}>Configura que tipos de datos personales se detectan y anonimizan automaticamente.</p>
                   <div className={`${cardCls} overflow-hidden`}>
                     {PII_RULES_META.map((rule) => (
-                      <div key={rule.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-gray-700 last:border-0 hover:bg-slate-50/50 dark:hover:bg-gray-700/50 transition-colors">
+                      <div key={rule.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
                         <div className="flex items-center gap-3">
-                          <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 dark:bg-gray-700 text-slate-500 dark:text-gray-400 rounded uppercase">{rule.category}</span>
-                          <span className="text-sm text-slate-800 dark:text-gray-200">{rule.label}</span>
+                          <span className="px-2 py-0.5 text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded uppercase">{rule.category}</span>
+                          <span className="text-sm text-slate-800 dark:text-slate-200">{rule.label}</span>
                         </div>
                         <button
                           onClick={() => setPiiStates((s) => ({ ...s, [rule.id]: !s[rule.id] }))}
-                          className={`relative w-10 h-5 rounded-full transition-colors ${piiStates[rule.id] ? "bg-primary" : "bg-slate-300 dark:bg-gray-600"}`}
+                          className={`relative w-10 h-5 rounded-full transition-colors ${piiStates[rule.id] ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
                         >
                           <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${piiStates[rule.id] ? "left-[22px]" : "left-0.5"}`} />
                         </button>
@@ -845,18 +845,18 @@ export default function ConfigPage() {
                         className={`flex items-start gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
                           substitutionTechnique === opt.id
                             ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
-                            : "border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-slate-300 dark:hover:border-gray-600"
+                            : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600"
                         }`}>
                         <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                          substitutionTechnique === opt.id ? "border-primary bg-primary" : "border-slate-300 dark:border-gray-600"
+                          substitutionTechnique === opt.id ? "border-primary bg-primary" : "border-slate-300 dark:border-slate-600"
                         }`}>
                           {substitutionTechnique === opt.id && <IconCheck />}
                         </div>
                         <div>
                           <input type="radio" name="technique" value={opt.id} checked={substitutionTechnique === opt.id}
                             onChange={(e) => setSubstitutionTechnique(e.target.value)} className="sr-only" />
-                          <p className="text-sm font-semibold text-slate-900 dark:text-gray-100">{opt.title}</p>
-                          <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{opt.desc}</p>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{opt.title}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{opt.desc}</p>
                         </div>
                       </label>
                     ))}
@@ -869,13 +869,13 @@ export default function ConfigPage() {
                   <p className={`${descCls} mb-4`}>Ajusta el umbral de deteccion. Mayor sensibilidad = mas detecciones pero posibles falsos positivos.</p>
                   <div className={`${cardCls} p-6`}>
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-bold text-slate-400 dark:text-gray-500 uppercase">Conservador</span>
+                      <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase">Conservador</span>
                       <span className={`text-sm font-bold ${sensitivityColor}`}>{sensitivityLabel} ({sensitivity}%)</span>
-                      <span className="text-xs font-bold text-slate-400 dark:text-gray-500 uppercase">Agresivo</span>
+                      <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase">Agresivo</span>
                     </div>
                     <input type="range" min="0" max="100" value={sensitivity} onChange={(e) => setSensitivity(Number(e.target.value))}
-                      className="w-full h-2 bg-slate-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
-                    <p className="text-xs text-slate-500 dark:text-gray-400 mt-3 leading-relaxed">
+                      className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-3 leading-relaxed">
                       {detectorType === "presidio" || detectorType === "composite"
                         ? `Con Presidio activo, el umbral de confianza del modelo NLP se ajusta al ${sensitivity}%. Valores altos detectan mas entidades pero pueden generar falsos positivos.`
                         : `El motor Regex usa patrones deterministas. La sensibilidad afecta heuristicas de nombres (${sensitivity}% umbral de coincidencia).`
@@ -915,12 +915,12 @@ export default function ConfigPage() {
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="text-sm font-bold text-slate-900 dark:text-gray-100">{sys.display_name}</p>
+                              <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{sys.display_name}</p>
                               <span className={`w-2 h-2 rounded-full ${statusDot(sys.last_connection_status)}`} />
-                              {sys.is_mock && <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">MOCK</span>}
-                              {!sys.is_active && <span className="px-1.5 py-0.5 text-[9px] font-bold bg-slate-100 dark:bg-gray-700 text-slate-500 dark:text-gray-400 rounded">INACTIVO</span>}
+                              {sys.is_mock && <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">MOCK</span>}
+                              {!sys.is_active && <span className="px-1.5 py-0.5 text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded">INACTIVO</span>}
                             </div>
-                            <p className="text-xs text-slate-500 dark:text-gray-400">
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
                               {timeAgo(sys.last_connection_test)} · {sys.connector_type.toUpperCase()}
                               {sys.base_url ? ` · ${sys.base_url.replace(/https?:\/\//, "").split("/")[0]}` : ""}
                             </p>
@@ -941,7 +941,7 @@ export default function ConfigPage() {
                           </button>
                           <button
                             onClick={() => handleExpand(sys.system_name)}
-                            className="px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-gray-400 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-700 transition-colors"
+                            className="px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                           >
                             {expandedSystem === sys.system_name ? "Cerrar" : "Gestionar"}
                           </button>
@@ -961,7 +961,7 @@ export default function ConfigPage() {
 
                       {/* Expanded edit panel */}
                       {expandedSystem === sys.system_name && (
-                        <div className="border-t border-slate-200 dark:border-gray-700 p-5 bg-slate-50/50 dark:bg-gray-900/50 space-y-4">
+                        <div className="border-t border-slate-200 dark:border-slate-700 p-5 bg-slate-50/50 dark:bg-slate-900/50 space-y-4">
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <label className={labelCls}>URL Base</label>
@@ -1023,24 +1023,24 @@ export default function ConfigPage() {
                             <div className="flex items-end gap-4">
                               <label className="flex items-center gap-2 cursor-pointer">
                                 <button onClick={() => setEditForm((f) => ({ ...f, is_active: !f.is_active }))}
-                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_active ? "bg-primary" : "bg-slate-300 dark:bg-gray-600"}`}>
+                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_active ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}>
                                   <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_active ? "left-[22px]" : "left-0.5"}`} />
                                 </button>
-                                <span className="text-xs font-semibold text-slate-700 dark:text-gray-300">Activo</span>
+                                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Activo</span>
                               </label>
                               <label className="flex items-center gap-2 cursor-pointer">
                                 <button onClick={() => setEditForm((f) => ({ ...f, is_mock: !f.is_mock }))}
-                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_mock ? "bg-amber-400" : "bg-slate-300 dark:bg-gray-600"}`}>
+                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_mock ? "bg-amber-400" : "bg-slate-300 dark:bg-slate-600"}`}>
                                   <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_mock ? "left-[22px]" : "left-0.5"}`} />
                                 </button>
-                                <span className="text-xs font-semibold text-slate-700 dark:text-gray-300">Mock</span>
+                                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Mock</span>
                               </label>
                             </div>
                           </div>
 
                           <div className="flex justify-end gap-2 pt-2">
                             <button onClick={() => setExpandedSystem(null)}
-                              className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-gray-400 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-white dark:hover:bg-gray-700 transition-colors">
+                              className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-white dark:hover:bg-slate-700 transition-colors">
                               Cancelar
                             </button>
                             <button onClick={() => handleSave(sys.system_name)} disabled={saving} className={btnPrimary}>
@@ -1069,8 +1069,8 @@ export default function ConfigPage() {
                     <p className={descCls}>Administra los tickets ingestados. Puedes eliminar tickets y sus datos asociados.</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs text-slate-500 dark:text-gray-400">{adminTickets.length} ticket{adminTickets.length !== 1 ? "s" : ""}</span>
-                    <button onClick={fetchAdminTickets} className="p-2 text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Refrescar">
+                    <span className="text-xs text-slate-500 dark:text-slate-400">{adminTickets.length} ticket{adminTickets.length !== 1 ? "s" : ""}</span>
+                    <button onClick={fetchAdminTickets} className="p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors" title="Refrescar">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                       </svg>
@@ -1089,43 +1089,43 @@ export default function ConfigPage() {
                         <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
                       </svg>
                     </div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-gray-100 mb-1">No hay tickets ingestados</p>
-                    <p className="text-xs text-slate-500 dark:text-gray-400">Los tickets apareceran aqui una vez ingestados desde la vista de Incidencias</p>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">No hay tickets ingestados</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Los tickets apareceran aqui una vez ingestados desde la vista de Incidencias</p>
                   </div>
                 ) : (
                   <div className={`${cardCls} overflow-hidden`}>
                     <table className="w-full">
                       <thead>
-                        <tr className="border-b border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800">
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">KOSIN Key</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Origen</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Source Key</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Resumen</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Prioridad</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Estado</th>
-                          <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Creado</th>
-                          <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Accion</th>
+                        <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
+                          <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">KOSIN Key</th>
+                          <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Origen</th>
+                          <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Source Key</th>
+                          <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Resumen</th>
+                          <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Prioridad</th>
+                          <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Estado</th>
+                          <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Creado</th>
+                          <th className="text-right px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Accion</th>
                         </tr>
                       </thead>
                       <tbody>
                         {adminTickets.map((t) => {
-                          const pr = priorityConfig[t.priority] || { bg: "bg-slate-100 dark:bg-gray-700", text: "text-slate-600 dark:text-gray-300", label: t.priority };
-                          const st = statusConfig[t.status] || { bg: "bg-slate-100 dark:bg-gray-700", text: "text-slate-600 dark:text-gray-300", label: t.status };
+                          const pr = priorityConfig[t.priority] || { bg: "bg-slate-100 dark:bg-slate-700", text: "text-slate-600 dark:text-slate-300", label: t.priority };
+                          const st = statusConfig[t.status] || { bg: "bg-slate-100 dark:bg-slate-700", text: "text-slate-600 dark:text-slate-300", label: t.status };
                           return (
-                            <tr key={t.id} className="border-b border-slate-100 dark:border-gray-700 hover:bg-slate-50/50 dark:hover:bg-gray-800/50 transition-colors">
+                            <tr key={t.id} className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                               <td className="px-4 py-3 text-sm font-semibold text-primary">{t.kosin_ticket_id}</td>
                               <td className="px-4 py-3">
-                                <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-300 rounded uppercase">{t.source_system}</span>
+                                <span className="px-2 py-0.5 text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded uppercase">{t.source_system}</span>
                               </td>
-                              <td className="px-4 py-3 text-sm text-slate-600 dark:text-gray-400">{t.source_ticket_id}</td>
-                              <td className="px-4 py-3 text-sm text-slate-800 dark:text-gray-200 max-w-[300px] truncate">{t.summary}</td>
+                              <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">{t.source_ticket_id}</td>
+                              <td className="px-4 py-3 text-sm text-slate-800 dark:text-slate-200 max-w-[300px] truncate">{t.summary}</td>
                               <td className="px-4 py-3">
-                                <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${pr.bg} ${pr.text}`}>{pr.label}</span>
+                                <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${pr.bg} ${pr.text}`}>{pr.label}</span>
                               </td>
                               <td className="px-4 py-3">
-                                <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
+                                <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
                               </td>
-                              <td className="px-4 py-3 text-xs text-slate-500 dark:text-gray-400">{new Date(t.created_at).toLocaleDateString("es-ES")}</td>
+                              <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{new Date(t.created_at).toLocaleDateString("es-ES")}</td>
                               <td className="px-4 py-3 text-right">
                                 <button onClick={() => setConfirmDelete(t.kosin_ticket_id)}
                                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
@@ -1155,11 +1155,11 @@ export default function ConfigPage() {
                 <IconTrash />
               </div>
               <div>
-                <p className="text-sm font-bold text-slate-900 dark:text-gray-100">Eliminar ticket</p>
-                <p className="text-xs text-slate-500 dark:text-gray-400">Esta accion no se puede deshacer</p>
+                <p className="text-sm font-bold text-slate-900 dark:text-slate-100">Eliminar ticket</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Esta accion no se puede deshacer</p>
               </div>
             </div>
-            <p className="text-sm text-slate-700 dark:text-gray-300 mb-1">
+            <p className="text-sm text-slate-700 dark:text-slate-300 mb-1">
               Se eliminara <span className="font-semibold text-primary">{confirmDelete}</span> de KOSIN y de la base de datos, incluyendo historial de chat y mapa de sustitucion.
             </p>
             {deleteError && (
@@ -1170,7 +1170,7 @@ export default function ConfigPage() {
             <div className="flex justify-end gap-2 mt-5">
               <button
                 onClick={() => { setConfirmDelete(null); setDeleteError(null); }}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-gray-400 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-700 transition-colors"
+                className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
               >
                 Cancelar
               </button>

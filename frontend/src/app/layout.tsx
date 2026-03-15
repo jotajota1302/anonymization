@@ -14,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body className="h-screen overflow-hidden antialiased bg-white dark:bg-gray-900 text-slate-900 dark:text-gray-100">
+      <body className="h-screen overflow-hidden antialiased bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
         <DarkModeInit />
         <a
           href="#main-content"

@@ -220,27 +220,27 @@ export default function Home() {
     : null;
 
   return (
-    <div className="bg-[#F8FAFC] dark:bg-gray-900 text-slate-900 dark:text-gray-100 h-screen flex flex-col overflow-hidden">
+    <div className="bg-[#F8FAFC] dark:bg-slate-900 text-slate-900 dark:text-slate-100 h-screen flex flex-col overflow-hidden">
       <Header
         activePage="incidencias"
         isConnected={isConnected}
         subheader={
           <>
             <div className="flex items-center gap-3 text-sm font-medium">
-              <span className="text-slate-400">KOSIN</span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-              <span className="text-slate-100">Proyecto PESESG</span>
+              <span className="text-slate-400 dark:text-slate-400">KOSIN</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400"><polyline points="9 18 15 12 9 6"/></svg>
+              <span className="text-slate-700 dark:text-slate-100">Proyecto PESESG</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mr-2">Sistemas Integrados:</span>
+              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mr-2">Sistemas Integrados:</span>
               <div className="flex gap-1.5">
                 {[...new Set(boardTickets.map((bt) => bt.source_system))].map((src) => (
-                  <span key={src} className="px-2 py-0.5 bg-slate-800 text-slate-300 text-[11px] font-semibold rounded border border-slate-700">
+                  <span key={src} className="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded border border-slate-300 dark:border-slate-700">
                     {src.toUpperCase()}
                   </span>
                 ))}
                 {boardTickets.length === 0 && (
-                  <span className="text-[11px] text-slate-500 italic">ninguno</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500 italic">ninguno</span>
                 )}
               </div>
             </div>
@@ -250,14 +250,14 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="flex-1 flex min-h-0 overflow-hidden">
-        <aside className="w-[30%] bg-navy-deep dark:bg-gray-950 flex flex-col border-r border-slate-800 dark:border-gray-700 min-h-0" aria-label="Lista de incidencias">
+        <aside className="w-[30%] bg-slate-50 dark:bg-slate-950 flex flex-col border-r border-slate-200 dark:border-slate-700 min-h-0" aria-label="Lista de incidencias">
           <TicketList
             boardTickets={boardTickets} tickets={tickets}
             selectedTicketId={selectedTicketId} selectedBoardKey={selectedBoardKey}
             onSelectTicket={handleSelectTicket} onSelectBoardTicket={handleSelectBoardTicket}
           />
         </aside>
-        <section id="main-content" className="flex-1 flex flex-col min-h-0 bg-white dark:bg-gray-900">
+        <section id="main-content" className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-900">
           <ChatPanel
             ticketId={selectedTicketId} boardTicket={selectedBoardTicket}
             onSendMessage={handleSendMessage} onFinishTicket={handleFinishTicket}
@@ -288,7 +288,7 @@ export default function Home() {
       {/* Confirm modal */}
       {confirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 border border-slate-200 dark:border-gray-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 border border-slate-200 dark:border-slate-700">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -296,14 +296,14 @@ export default function Home() {
                   <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-slate-900">{confirmModal.title}</h3>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">{confirmModal.title}</h3>
             </div>
-            <p className="text-sm text-slate-600 mb-6 ml-[52px]">{confirmModal.message}</p>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 ml-[52px]">{confirmModal.message}</p>
             <div className="flex justify-end gap-3">
-              <button onClick={() => setConfirmModal(null)} className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+              <button onClick={() => setConfirmModal(null)} className="px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
                 Cancelar
               </button>
-              <button onClick={confirmModal.onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors">
+              <button onClick={confirmModal.onConfirm} className="px-4 py-2 text-sm font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors">
                 Confirmar
               </button>
             </div>

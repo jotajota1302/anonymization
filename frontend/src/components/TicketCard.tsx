@@ -35,14 +35,14 @@ export function TicketCard({ ticket, isSelected, onClick }: Props) {
       tabIndex={0}
       aria-selected={isSelected}
       aria-label={`Ticket ${ticket.kosin_id}, estado ${statusLabel}`}
-      className={`p-3 rounded-lg cursor-pointer transition-all ${
+      className={`p-3.5 rounded-xl cursor-pointer transition-all ${
         isSelected
           ? "bg-primary/10 border border-primary/30"
-          : "bg-slate-800/40 border border-slate-700/50 hover:bg-slate-800/60"
+          : "bg-white dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-800/60 shadow-sm"
       }`}
     >
       <div className="flex justify-between items-start mb-2">
-        <span className={`text-xs font-bold ${isSelected ? "text-white" : "text-primary"}`}>
+        <span className="text-sm font-bold text-primary">
           [ANON] {ticket.kosin_id}
         </span>
         <div className="flex gap-1">
@@ -53,19 +53,19 @@ export function TicketCard({ ticket, isSelected, onClick }: Props) {
           />
         </div>
       </div>
-      <p className={`text-xs font-medium line-clamp-2 ${isSelected ? "text-slate-200" : "text-slate-300"}`}>
+      <p className={`text-xs font-medium line-clamp-2 ${isSelected ? "text-slate-600 dark:text-slate-200" : "text-slate-600 dark:text-slate-300"}`}>
         {ticket.summary}
       </p>
       <div className="mt-3 flex items-center gap-2">
         <div className="flex -space-x-2">
-          <div className="w-5 h-5 rounded-full border border-slate-900 bg-slate-700 flex items-center justify-center text-[7px] font-bold text-slate-400">
+          <div className="w-5 h-5 rounded-full border border-white dark:border-slate-900 bg-slate-300 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-500 dark:text-slate-400">
             OP
           </div>
-          <div className="w-5 h-5 rounded-full border border-slate-900 bg-primary flex items-center justify-center text-[8px] font-bold text-white">
+          <div className="w-5 h-5 rounded-full border border-white dark:border-slate-900 bg-primary flex items-center justify-center text-xs font-bold text-white">
             AI
           </div>
         </div>
-        <span className="text-[10px] text-slate-400">
+        <span className="text-xs text-slate-400">
           {isActive ? "Activo ahora" : statusLabel}
         </span>
       </div>

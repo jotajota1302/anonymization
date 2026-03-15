@@ -179,7 +179,7 @@ export function CommandPalette({ onSelectTicket, onSelectBoardTicket }: Props) {
           </span>
           <span className="text-sm truncate">{item.label}</span>
           {item.badge && (
-            <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded shrink-0 ${item.badgeColor || "bg-slate-100 text-slate-600"}`}>
+            <span className={`px-1.5 py-0.5 text-xs font-bold rounded shrink-0 ${item.badgeColor || "bg-slate-100 text-slate-600"}`}>
               {item.badge}
             </span>
           )}
@@ -202,7 +202,7 @@ export function CommandPalette({ onSelectTicket, onSelectBoardTicket }: Props) {
           <input ref={inputRef} type="text" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={handleKeyDown}
             placeholder="Buscar tickets, acciones, navegacion..."
             className="flex-1 text-sm bg-transparent outline-none placeholder:text-slate-400" />
-          <kbd className="px-1.5 py-0.5 text-[10px] font-bold text-slate-400 bg-slate-100 rounded border border-slate-200">ESC</kbd>
+          <kbd className="px-1.5 py-0.5 text-xs font-bold text-slate-400 bg-slate-100 rounded border border-slate-200">ESC</kbd>
         </div>
 
         {/* Results */}
@@ -213,41 +213,41 @@ export function CommandPalette({ onSelectTicket, onSelectBoardTicket }: Props) {
 
           {grouped.ticket.length > 0 && (
             <div>
-              <div className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50">Tickets recientes</div>
+              <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50">Tickets recientes</div>
               {grouped.ticket.map(renderItem)}
             </div>
           )}
 
           {grouped.action.length > 0 && (
             <div>
-              <div className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50">Acciones rapidas</div>
+              <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50">Acciones rapidas</div>
               {grouped.action.map(renderItem)}
             </div>
           )}
 
           {grouped.nav.length > 0 && (
             <div>
-              <div className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50">Navegacion</div>
+              <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50">Navegacion</div>
               {grouped.nav.map(renderItem)}
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-[10px] text-slate-400">
+        <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-400">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1">
-              <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-[9px] font-bold">↑</kbd>
-              <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-[9px] font-bold">↓</kbd>
+              <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-xs font-bold">↑</kbd>
+              <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-xs font-bold">↓</kbd>
               navegar
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-[9px] font-bold">↵</kbd>
+              <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-xs font-bold">↵</kbd>
               seleccionar
             </span>
           </div>
           <span className="flex items-center gap-1">
-            <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-[9px] font-bold">ESC</kbd>
+            <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-xs font-bold">ESC</kbd>
             cerrar
           </span>
         </div>
