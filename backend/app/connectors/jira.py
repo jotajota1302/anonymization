@@ -93,6 +93,82 @@ MOCK_TICKETS = {
         "reporter": "Pedro Sanchez",
         "assignee": "Equipo Soporte Offshore",
     },
+    "PROJ-106": {
+        "key": "PROJ-106",
+        "summary": "Laura Diaz reporta error 500 en API de pagos",
+        "description": (
+            "Laura Diaz (laura.diaz@fintech.es, tel: +34 622 111 444, "
+            "DNI: 33445566F) reporta que la API de pagos devuelve error 500 "
+            "desde las 14:00. El endpoint afectado es /api/v2/payments en "
+            "el servidor api-payments-01 (IP: 10.20.30.40). Tarjeta de prueba "
+            "utilizada: 4532 0123 4567 8901. Oficina: Malaga, Calle Larios 5."
+        ),
+        "status": "Open",
+        "priority": "Critical",
+        "created": "2026-03-13T14:10:00Z",
+        "reporter": "Laura Diaz",
+        "assignee": "Equipo Soporte Offshore",
+    },
+    "PROJ-107": {
+        "key": "PROJ-107",
+        "summary": "Roberto Ruiz solicita migracion de base de datos",
+        "description": (
+            "Roberto Ruiz (roberto.ruiz@corp.com, tel: +34 633 222 555, "
+            "DNI: 44556677G) necesita migrar la base de datos legacy-db-03 "
+            "(IP: 172.16.5.20) al nuevo cluster db-cluster-prod. "
+            "Ubicacion: Zaragoza, Paseo Independencia 12."
+        ),
+        "status": "Open",
+        "priority": "Medium",
+        "created": "2026-03-13T16:00:00Z",
+        "reporter": "Roberto Ruiz",
+        "assignee": "Equipo Soporte Offshore",
+    },
+    "PROJ-108": {
+        "key": "PROJ-108",
+        "summary": "Elena Torres detecta certificado SSL expirado en portal cliente",
+        "description": (
+            "Elena Torres (elena.torres@acme.com, tel: +34 644 333 666, "
+            "DNI: 55667788H) informa que el certificado SSL del portal "
+            "cliente-portal.acme.com ha expirado. Servidor web-front-02 "
+            "(IP: 192.168.50.10). Oficina: Alicante, Rambla Mendez Nunez 8."
+        ),
+        "status": "Open",
+        "priority": "High",
+        "created": "2026-03-14T08:30:00Z",
+        "reporter": "Elena Torres",
+        "assignee": "Equipo Soporte Offshore",
+    },
+    "PROJ-109": {
+        "key": "PROJ-109",
+        "summary": "Miguel Navarro reporta disco al 95% en servidor de backups",
+        "description": (
+            "Miguel Navarro (miguel.navarro@internal.net, tel: +34 655 444 777, "
+            "DNI: 66778899I) alerta de que el servidor backup-srv-01 "
+            "(IP: 10.0.50.100) tiene el disco al 95%. Se requiere limpieza "
+            "urgente o ampliacion. Oficina: Murcia, Gran Via 18."
+        ),
+        "status": "Open",
+        "priority": "High",
+        "created": "2026-03-14T10:15:00Z",
+        "reporter": "Miguel Navarro",
+        "assignee": "Equipo Soporte Offshore",
+    },
+    "PROJ-110": {
+        "key": "PROJ-110",
+        "summary": "Sofia Moreno necesita permisos de administrador en Jira",
+        "description": (
+            "Sofia Moreno (sofia.moreno@empresa.es, tel: +34 666 555 888, "
+            "DNI: 77889900J) solicita permisos de administrador en el proyecto "
+            "PESESG de Jira para gestionar workflows. Su usuario es smoreno. "
+            "Oficina: Granada, Carrera del Darro 3."
+        ),
+        "status": "Open",
+        "priority": "Low",
+        "created": "2026-03-14T12:00:00Z",
+        "reporter": "Sofia Moreno",
+        "assignee": "Equipo Soporte Offshore",
+    },
 }
 
 

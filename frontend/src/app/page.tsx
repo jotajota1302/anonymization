@@ -250,7 +250,7 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="flex-1 flex min-h-0 overflow-hidden">
-        <aside className="w-[30%] bg-navy-deep dark:bg-gray-950 flex flex-col border-r border-slate-800 dark:border-gray-700 overflow-y-auto custom-scrollbar" aria-label="Lista de incidencias">
+        <aside className="w-[30%] bg-navy-deep dark:bg-gray-950 flex flex-col border-r border-slate-800 dark:border-gray-700 min-h-0" aria-label="Lista de incidencias">
           <TicketList
             boardTickets={boardTickets} tickets={tickets}
             selectedTicketId={selectedTicketId} selectedBoardKey={selectedBoardKey}
