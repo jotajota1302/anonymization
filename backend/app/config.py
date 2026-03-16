@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     # Database
     db_path: str = Field(default="data/ticketing.db", description="SQLite database path")
 
-    # LLM Provider: "ollama", "azure", or "openai"
-    llm_provider: str = Field(default="ollama", description="LLM provider: 'ollama', 'azure', or 'openai'")
+    # LLM Provider: "ollama", "azure", "openai", or "axet"
+    llm_provider: str = Field(default="ollama", description="LLM provider: 'ollama', 'azure', 'openai', or 'axet'")
 
     # Ollama
     ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama server URL")
@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     # OpenAI (direct API, not Azure)
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
+
+    # Axet (NTT Data OpenAI proxy)
+    axet_bearer_token: str = Field(default="", description="Axet Bearer token for authentication")
+    axet_asset_id: str = Field(default="d9d2cf40-2036-4195-97bb-255f011fd1d4", description="Axet asset ID")
+    axet_project_id: str = Field(default="", description="Axet project ID")
+    axet_model: str = Field(default="gpt-4o-mini", description="Axet model name")
+
+    # Axet OKTA OAuth2 (Device Authorization flow)
+    axet_okta_domain: str = Field(default="https://onentt.okta.com", description="OKTA domain")
+    axet_okta_client_id: str = Field(default="0oafbxeqmbkQ7ydpU417", description="OKTA client ID for Axet")
+    axet_okta_auth_server_id: str = Field(default="ausf3mzucjRGKYWLy417", description="OKTA authorization server ID")
 
     # Jira / KOSIN (same instance for POC)
     # For POC: same Jira acts as source (read real tickets) and destination (create anonymized copies)

@@ -159,6 +159,15 @@ export default function ConfigPage() {
   const [promptSaving, setPromptSaving] = useState(false);
   const [promptSaved, setPromptSaved] = useState(false);
   const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [axetBearerToken, setAxetBearerToken] = useState("");
+  const [axetAssetId, setAxetAssetId] = useState("");
+  const [axetProjectId, setAxetProjectId] = useState("");
+  const [axetAuth, setAxetAuth] = useState<{ authenticated: boolean; user?: { displayName?: string; name?: string; email?: string; preferred_username?: string }; expires_in?: number; has_refresh_token?: boolean } | null>(null);
+  const [axetAuthLoading, setAxetAuthLoading] = useState(false);
+  const [axetDeviceCode, setAxetDeviceCode] = useState<{ user_code: string; verification_uri_complete: string } | null>(null);
+  const [axetPolling, setAxetPolling] = useState(false);
+  const [axetModels, setAxetModels] = useState<{ id: string; displayName: string }[]>([]);
+  const [axetProjects, setAxetProjects] = useState<{ id: string; displayName: string }[]>([]);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionResult, setConnectionResult] = useState<{ success: boolean; message: string } | null>(null);
 
@@ -256,6 +265,59 @@ export default function ConfigPage() {
     fetchAnonymization();
     fetchAgentConfig();
   }, [fetchIntegrations, fetchGeneralSettings, fetchAdminTickets, fetchAnonymization, fetchAgentConfig]);
+
+  // Axet OAuth: fetch auth status and listen for popup messages
+  const fetchAxetAuthStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/axet/auth/status`);
+      const data = await res.json();
+      setAxetAuth(data);
+    } catch {}
+  }, []);
+
+  const fetchAxetModels = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/axet/auth/models`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.models?.length) {
+          setAxetModels(data.models);
+          // Sync agentModel: if current value doesn't match any loaded model id, select first
+          setAgentModel((prev) => {
+            const ids = data.models.map((m: { id: string }) => m.id);
+            return ids.includes(prev) ? prev : data.models[0].id;
+          });
+        }
+      }
+    } catch {}
+  }, []);
+
+  const fetchAxetProjects = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/axet/auth/projects`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.projects?.length) {
+          setAxetProjects(data.projects);
+          // Auto-select first project if none selected
+          if (!axetProjectId && !agentConfig?.axet_config?.project_id) {
+            setAxetProjectId(data.projects[0].id);
+          }
+        }
+      }
+    } catch {}
+  }, [axetProjectId, agentConfig?.axet_config?.project_id]);
+
+  useEffect(() => {
+    fetchAxetAuthStatus();
+  }, [fetchAxetAuthStatus]);
+
+  useEffect(() => {
+    if (axetAuth?.authenticated) {
+      fetchAxetModels();
+      fetchAxetProjects();
+    }
+  }, [axetAuth?.authenticated, fetchAxetModels, fetchAxetProjects]);
 
   const handleExpand = (systemName: string) => {
     if (expandedSystem === systemName) {
@@ -409,7 +471,12 @@ export default function ConfigPage() {
       const res = await fetch(`${API_URL}/api/config/agent`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: agentProvider, model: agentModel, temperature: agentTemp }),
+        body: JSON.stringify({
+          provider: agentProvider,
+          model: agentModel,
+          temperature: agentTemp,
+          ...(agentProvider === "axet" && axetProjectId ? { axet_project_id: axetProjectId } : {}),
+        }),
       });
       if (res.ok) {
         setAgentSaved(true);
@@ -571,11 +638,12 @@ export default function ConfigPage() {
                   <p className={`${descCls} mb-4`}>Configura el LLM que usa el agente de anonimizacion.</p>
 
                   {/* Provider radio cards */}
-                  <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="grid grid-cols-4 gap-3 mb-4">
                     {[
                       { id: "ollama", title: "Ollama", desc: "Desarrollo local", bgColor: "bg-green-600" },
                       { id: "openai", title: "OpenAI", desc: "API directa GPT", bgColor: "bg-slate-800 dark:bg-slate-600" },
                       { id: "azure", title: "Azure OpenAI", desc: "Produccion GDPR", bgColor: "bg-blue-600" },
+                      { id: "axet", title: "Axet NTT", desc: "Proxy corporativo", bgColor: "bg-purple-600" },
                     ].map((p) => (
                       <button key={p.id} onClick={() => {
                         setAgentProvider(p.id);
@@ -587,6 +655,8 @@ export default function ConfigPage() {
                           setAgentModel(agentConfig?.openai_config?.model || "gpt-4o-mini");
                         } else if (p.id === "azure") {
                           setAgentModel(agentConfig?.azure_config?.deployment || "gpt-4");
+                        } else if (p.id === "axet") {
+                          setAgentModel(agentConfig?.axet_config?.model || "gpt-4o-mini");
                         }
                       }}
                         className={`p-4 rounded-xl border text-left transition-all ${
@@ -600,6 +670,8 @@ export default function ConfigPage() {
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="3"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="16" x2="13" y2="16"/></svg>
                             ) : p.id === "openai" ? (
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z"/><path d="M8 12l2 2 4-4"/></svg>
+                            ) : p.id === "axet" ? (
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                             ) : (
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>
                             )}
@@ -684,6 +756,223 @@ export default function ConfigPage() {
                           </p>
                         </div>
                       </>
+                    ) : agentProvider === "axet" ? (
+                      <>
+                        {/* OKTA Device Code Login */}
+                        <div className={`p-4 rounded-lg border ${
+                          axetAuth?.authenticated
+                            ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+                            : axetDeviceCode
+                              ? "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800"
+                              : "bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700"
+                        }`}>
+                          {axetAuth?.authenticated ? (
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                    Sesion activa — {axetAuth.user?.displayName || axetAuth.user?.name || axetAuth.user?.email || "Usuario"}
+                                  </p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                                    Expira en {Math.floor((axetAuth.expires_in || 0) / 60)} min{axetAuth.has_refresh_token ? " (auto-renovable)" : ""}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await fetch(`${API_URL}/api/axet/auth/refresh`, { method: "POST" });
+                                      fetchAxetAuthStatus();
+                                    } catch {}
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                                >
+                                  Renovar
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await fetch(`${API_URL}/api/axet/auth/logout`, { method: "POST" });
+                                      setAxetAuth(null);
+                                      fetchAxetAuthStatus();
+                                    } catch {}
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 bg-white dark:bg-slate-800 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                >
+                                  Cerrar sesion
+                                </button>
+                              </div>
+                            </div>
+                          ) : axetDeviceCode ? (
+                            <div className="text-center space-y-3">
+                              <p className="text-sm text-slate-600 dark:text-slate-300">
+                                Abre el siguiente enlace e introduce el codigo:
+                              </p>
+                              <div className="bg-white dark:bg-slate-900 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                <p className="text-2xl font-mono font-bold tracking-widest text-purple-700 dark:text-purple-400">
+                                  {axetDeviceCode.user_code}
+                                </p>
+                              </div>
+                              <a
+                                href={axetDeviceCode.verification_uri_complete}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-block px-4 py-2 text-sm font-bold text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors"
+                              >
+                                Abrir pagina de login OKTA
+                              </a>
+                              <div className="flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                                <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                                Esperando autenticacion...
+                              </div>
+                              <button
+                                onClick={() => { setAxetDeviceCode(null); setAxetPolling(false); }}
+                                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-3 h-3 rounded-full bg-slate-400" />
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">No autenticado</p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">Inicia sesion con OKTA corporativo</p>
+                                </div>
+                              </div>
+                              <button
+                                disabled={axetAuthLoading}
+                                onClick={async () => {
+                                  setAxetAuthLoading(true);
+                                  try {
+                                    const res = await fetch(`${API_URL}/api/axet/auth/start`, { method: "POST" });
+                                    const data = await res.json();
+                                    if (data.user_code) {
+                                      setAxetDeviceCode({ user_code: data.user_code, verification_uri_complete: data.verification_uri_complete });
+                                      // Start polling
+                                      setAxetPolling(true);
+                                      const pollInterval = setInterval(async () => {
+                                        try {
+                                          const pollRes = await fetch(`${API_URL}/api/axet/auth/poll`, { method: "POST" });
+                                          const pollData = await pollRes.json();
+                                          if (pollData.status === "success") {
+                                            clearInterval(pollInterval);
+                                            setAxetDeviceCode(null);
+                                            setAxetPolling(false);
+                                            fetchAxetAuthStatus();
+                                          } else if (pollData.status === "expired" || pollData.status === "error") {
+                                            clearInterval(pollInterval);
+                                            setAxetDeviceCode(null);
+                                            setAxetPolling(false);
+                                          }
+                                        } catch {
+                                          clearInterval(pollInterval);
+                                          setAxetDeviceCode(null);
+                                          setAxetPolling(false);
+                                        }
+                                      }, 5000);
+                                    }
+                                  } catch {}
+                                  setAxetAuthLoading(false);
+                                }}
+                                className="px-4 py-1.5 text-xs font-bold text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors"
+                              >
+                                {axetAuthLoading ? "Iniciando..." : "Login con OKTA"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className={labelCls}>Modelo</label>
+                          <select value={agentModel} onChange={(e) => setAgentModel(e.target.value)} className={inputCls}>
+                            {axetModels.length > 0 ? (
+                              axetModels.map((m) => <option key={m.id} value={m.id}>{m.displayName || m.id}</option>)
+                            ) : (
+                              ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"].map((m) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))
+                            )}
+                          </select>
+                          {axetAuth?.authenticated && axetModels.length === 0 && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">Cargando modelos de Axet...</p>
+                          )}
+                        </div>
+
+                        {/* Manual token fallback (collapsible) */}
+                        {!axetAuth?.authenticated && (
+                          <div>
+                            <label className={labelCls}>Bearer Token (manual)</label>
+                            <div className="flex gap-2">
+                              <input
+                                type="password"
+                                value={axetBearerToken}
+                                onChange={(e) => setAxetBearerToken(e.target.value)}
+                                placeholder={agentConfig?.axet_config?.token_masked || "eyJ..."}
+                                className={`${inputCls} flex-1`}
+                              />
+                              <button
+                                onClick={async () => {
+                                  if (!axetBearerToken) return;
+                                  try {
+                                    await fetch(`${API_URL}/api/config/agent/api-key`, {
+                                      method: "PUT",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ provider: "axet", api_key: axetBearerToken }),
+                                    });
+                                    setAgentSaved(true);
+                                    setTimeout(() => setAgentSaved(false), 2000);
+                                  } catch {}
+                                }}
+                                className="px-3 py-2 text-xs font-bold text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shrink-0"
+                              >
+                                Aplicar
+                              </button>
+                            </div>
+                            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                              Alternativa: pega un token manualmente si el login OKTA no esta disponible
+                            </p>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className={labelCls}>Asset ID</label>
+                          <input
+                            type="text"
+                            value={axetAssetId || agentConfig?.axet_config?.asset_id || ""}
+                            onChange={(e) => setAxetAssetId(e.target.value)}
+                            placeholder="43d4310b-..."
+                            className={inputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Proyecto</label>
+                          {axetProjects.length > 0 ? (
+                            <select
+                              value={axetProjectId || agentConfig?.axet_config?.project_id || ""}
+                              onChange={(e) => setAxetProjectId(e.target.value)}
+                              className={inputCls}
+                            >
+                              <option value="">Selecciona un proyecto...</option>
+                              {axetProjects.map((p) => (
+                                <option key={p.id} value={p.id}>{p.displayName || p.id}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              value={axetProjectId || agentConfig?.axet_config?.project_id || ""}
+                              onChange={(e) => setAxetProjectId(e.target.value)}
+                              placeholder={axetAuth?.authenticated ? "Cargando proyectos..." : "Inicia sesion para ver proyectos"}
+                              className={inputCls}
+                            />
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">Proxy corporativo NTT Data — axet.nttdata.com</p>
+                      </>
                     ) : (
                       <>
                         <div>
@@ -744,6 +1033,11 @@ export default function ConfigPage() {
                         try {
                           const payload: Record<string, string> = { provider: agentProvider, model: agentModel };
                           if (agentProvider === "openai" && openaiApiKey) payload.api_key = openaiApiKey;
+                          if (agentProvider === "axet") {
+                            if (axetBearerToken) payload.axet_bearer_token = axetBearerToken;
+                            if (axetAssetId) payload.axet_asset_id = axetAssetId;
+                            if (axetProjectId) payload.axet_project_id = axetProjectId;
+                          }
                           const res = await fetch(`${API_URL}/api/config/agent/test-connection`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },

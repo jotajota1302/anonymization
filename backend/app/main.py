@@ -213,11 +213,16 @@ async def lifespan(app: FastAPI):
                        hint="Set LLM provider env vars for agent functionality")
         app_state["agent"] = None
 
+    # Start Axet token auto-refresh background task
+    from .routers.axet_auth import start_auto_refresh, stop_auto_refresh
+    start_auto_refresh()
+
     logger.info("application_started")
     yield
 
     # Cleanup
     logger.info("shutting_down")
+    stop_auto_refresh()
     app_state.clear()
 
 
@@ -241,12 +246,13 @@ app.add_middleware(
 )
 
 # Include routers
-from .routers import tickets, chat, admin, config  # noqa: E402
+from .routers import tickets, chat, admin, config, axet_auth  # noqa: E402
 
 app.include_router(tickets.router)
 app.include_router(chat.router)
 app.include_router(admin.router)
 app.include_router(config.router)
+app.include_router(axet_auth.router)
 
 
 @app.get("/health")

@@ -239,8 +239,40 @@ class AnonymizationAgent:
                 temperature=temperature,
                 streaming=True,
             )
+        elif provider == "axet":
+            import httpx
+            from langchain_openai import ChatOpenAI
+            from ..routers.axet_auth import get_token_or_setting, _token_store
+            project_id = kwargs.get("axet_project_id", settings.axet_project_id)
+            if not project_id:
+                raise ValueError("Axet project_id no configurado. Selecciona un proyecto en la configuracion.")
+            bearer_token = kwargs.get("axet_bearer_token") or get_token_or_setting()
+            if not bearer_token:
+                raise ValueError("Axet bearer token no disponible. Inicia sesion con OKTA.")
+            asset_id = kwargs.get("axet_asset_id", settings.axet_asset_id)
+            base_url = f"https://axet.nttdata.com/api/llm-enabler/v2/openai/ntt/{project_id}/v1"
+            default_headers = {
+                "Authorization": f"Bearer {bearer_token}",
+                "axet-asset-id": asset_id,
+            }
+            # Add user ID if available from OAuth
+            user_info = _token_store.get("user_info")
+            if user_info and user_info.get("id"):
+                default_headers["axet-user-id"] = user_info["id"]
+            http_client = httpx.Client(verify=False)
+            async_http_client = httpx.AsyncClient(verify=False)
+            return ChatOpenAI(
+                api_key="dummy-key",
+                base_url=base_url,
+                default_headers=default_headers,
+                http_client=http_client,
+                http_async_client=async_http_client,
+                model=model or settings.axet_model,
+                temperature=temperature,
+                streaming=True,
+            )
         else:
-            raise ValueError(f"Unknown LLM provider: {provider}. Use 'ollama', 'azure', or 'openai'")
+            raise ValueError(f"Unknown LLM provider: {provider}. Use 'ollama', 'azure', 'openai', or 'axet'")
 
     def update_llm(self, provider: str, model: str, temperature: float = 0.3, **kwargs):
         """Hot-reload: recreate the LLM instance with new config."""
