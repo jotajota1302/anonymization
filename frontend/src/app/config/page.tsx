@@ -913,16 +913,6 @@ export default function ConfigPage() {
                         )}
 
                         <div>
-                          <label className={labelCls}>Asset ID</label>
-                          <input
-                            type="text"
-                            value={axetAssetId || agentConfig?.axet_config?.asset_id || ""}
-                            onChange={(e) => setAxetAssetId(e.target.value)}
-                            placeholder="43d4310b-..."
-                            className={inputCls}
-                          />
-                        </div>
-                        <div>
                           <label className={labelCls}>Proyecto</label>
                           {axetProjects.length > 0 ? (
                             <select
