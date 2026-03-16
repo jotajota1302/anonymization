@@ -115,6 +115,20 @@ export default function Home() {
     [selectTicket, setChatHistory, requestSummary, chatMessages]
   );
 
+  // Auto-select ticket from query param (e.g. /?ticket=5)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ticketParam = params.get("ticket");
+    if (ticketParam && tickets.length > 0) {
+      const id = Number(ticketParam);
+      if (id && tickets.some((t) => t.id === id) && selectedTicketId !== id) {
+        handleSelectTicket(id);
+        // Clean up URL
+        window.history.replaceState({}, "", "/");
+      }
+    }
+  }, [tickets, handleSelectTicket, selectedTicketId]);
+
   const handleSelectBoardTicket = useCallback(
     (key: string) => { selectBoardTicket(key); },
     [selectBoardTicket]
@@ -127,6 +141,9 @@ export default function Home() {
         const res = await fetch(`${API_URL}/api/tickets/ingest-confirm/${key}`, { method: "POST" });
         if (res.ok) {
           const data = await res.json();
+          if (data.pii_warning) {
+            showToast(data.pii_warning, "success");
+          }
           await Promise.all([fetchBoardTickets(), fetchTickets()]);
           handleSelectTicket(data.ticket_id);
         } else {

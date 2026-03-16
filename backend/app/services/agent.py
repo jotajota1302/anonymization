@@ -258,10 +258,24 @@ class AnonymizationAgent:
         return app_state.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
 
     def _build_messages(
-        self, chat_history: List[Dict], user_message: str
+        self, chat_history: List[Dict], user_message: str,
+        ticket_context: Optional[Dict] = None,
     ) -> List:
         """Build message list from chat history and new message."""
         messages = [SystemMessage(content=self._get_system_prompt())]
+
+        if ticket_context:
+            context_msg = (
+                "Contexto del ticket activo:\n"
+                f"- Ticket origen (sistema fuente): {ticket_context.get('source_ticket_id', 'N/A')}\n"
+                f"- Ticket anonimizado (KOSIN destino): {ticket_context.get('kosin_ticket_id', 'N/A')}\n"
+                f"- Sistema fuente: {ticket_context.get('source_system', 'N/A')}\n"
+                f"- Estado: {ticket_context.get('status', 'N/A')}\n"
+                f"- Prioridad: {ticket_context.get('priority', 'N/A')}\n"
+                "Usa estos IDs cuando necesites leer, actualizar o comentar en los tickets. "
+                "No necesites pedir estos datos al operador."
+            )
+            messages.append(SystemMessage(content=context_msg))
 
         for msg in chat_history:
             if msg["role"] == "operator":
@@ -297,8 +311,9 @@ class AnonymizationAgent:
         5. Save to chat history
         6. Send response via WebSocket
         """
-        # 1. Load substitution map
+        # 1. Load substitution map and ticket context
         sub_map = await self._get_substitution_map(ticket_id)
+        ticket = await self.db.get_ticket(ticket_id)
 
         # 2. PRE-filter: anonymize user input
         filtered_message = self.anonymizer.filter_output(user_message, sub_map)
@@ -310,7 +325,7 @@ class AnonymizationAgent:
         await self.db.add_chat_message(ticket_id, "operator", filtered_message)
 
         # 4. Build messages and invoke LLM
-        messages = self._build_messages(history, filtered_message)
+        messages = self._build_messages(history, filtered_message, ticket_context=ticket)
 
         streaming_cb = StreamingCallback(self.ws_manager, client_id, ticket_id)
 
@@ -397,7 +412,8 @@ class AnonymizationAgent:
         prompt = (
             f"El operador ha seleccionado la siguiente incidencia para revisarla. "
             f"Presentale un resumen claro y preguntale como quiere proceder.\n\n"
-            f"Referencia: {ticket['kosin_ticket_id']}\n"
+            f"Ticket origen: {ticket['source_ticket_id']}\n"
+            f"Referencia KOSIN: {ticket['kosin_ticket_id']}\n"
             f"Resumen: {ticket['summary']}\n"
             f"Descripcion anonimizada:\n{ticket['anonymized_description']}\n"
             f"Estado: {ticket['status']}\n"

@@ -39,7 +39,7 @@ class KosinConnector(TicketConnector):
         }
 
     async def get_ticket(self, ticket_id: str) -> Dict:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
                 f"{self._api_base}/issue/{ticket_id}",
                 headers=self._headers,
@@ -67,7 +67,7 @@ class KosinConnector(TicketConnector):
             }
 
     async def download_attachment(self, attachment_url: str) -> bytes:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             resp = await client.get(
                 attachment_url,
                 headers=self._headers,
@@ -76,7 +76,7 @@ class KosinConnector(TicketConnector):
             return resp.content
 
     async def get_comments(self, ticket_id: str) -> List[Dict]:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
                 f"{self._api_base}/issue/{ticket_id}/comment",
                 headers=self._headers,
@@ -131,7 +131,7 @@ class KosinConnector(TicketConnector):
             }
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{self._api_base}/issue",
                     headers=self._headers,
@@ -147,23 +147,59 @@ class KosinConnector(TicketConnector):
             logger.error("kosin_create_failed", status=e.response.status_code, body=body)
             return None, f"HTTP {e.response.status_code}: {body}"
         except httpx.HTTPError as e:
-            logger.error("kosin_create_failed", error=str(e))
-            return None, str(e)
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_create_failed", error=error_msg, error_type=type(e).__name__)
+            return None, error_msg
 
-    async def delete_ticket(self, ticket_id: str) -> bool:
-        """Delete a ticket from KOSIN via REST API."""
+    async def find_anon_ticket(self, source_key: str) -> Optional[str]:
+        """Check if an [ANON] ticket already exists in KOSIN for the given source key.
+        Returns the KOSIN key if found, None otherwise."""
+        jql = (
+            f'project={self.project} '
+            f'AND summary ~ "ANON" AND summary ~ "{source_key}"'
+        )
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{self._api_base}/search",
+                    headers=self._headers,
+                    params={"jql": jql, "maxResults": 5, "fields": "summary"},
+                )
+                resp.raise_for_status()
+                issues = resp.json().get("issues", [])
+                for issue in issues:
+                    summary = issue.get("fields", {}).get("summary", "")
+                    if "[ANON]" in summary and source_key in summary:
+                        logger.info("kosin_anon_ticket_found", source_key=source_key, existing=issue["key"])
+                        return issue["key"]
+                return None
+        except httpx.HTTPError as e:
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_find_anon_failed", source_key=source_key, error=error_msg)
+            return None
+
+    async def delete_ticket(self, ticket_id: str) -> tuple[bool, Optional[str]]:
+        """Delete a ticket from KOSIN via REST API (with subtasks).
+        Returns (success, error_message)."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.delete(
                     f"{self._api_base}/issue/{ticket_id}",
                     headers=self._headers,
+                    params={"deleteSubtasks": "true"},
                 )
                 resp.raise_for_status()
                 logger.info("kosin_ticket_deleted", key=ticket_id)
-                return True
+                return True, None
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            error_msg = f"HTTP {e.response.status_code}: {body}"
+            logger.error("kosin_delete_failed", key=ticket_id, error=error_msg)
+            return False, error_msg
         except httpx.HTTPError as e:
-            logger.error("kosin_delete_failed", key=ticket_id, error=str(e))
-            return False
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_delete_failed", key=ticket_id, error=error_msg, error_type=type(e).__name__)
+            return False, error_msg
 
     async def update_status(self, ticket_id: str, status: str) -> bool:
         """Update ticket status via transitions."""
@@ -173,7 +209,7 @@ class KosinConnector(TicketConnector):
             return False
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{self._api_base}/issue/{ticket_id}/transitions",
                     headers=self._headers,
@@ -182,13 +218,18 @@ class KosinConnector(TicketConnector):
                 resp.raise_for_status()
                 logger.info("kosin_status_updated", ticket=ticket_id, status=status)
                 return True
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            logger.error("kosin_transition_failed", error=f"HTTP {e.response.status_code}: {body}")
+            return False
         except httpx.HTTPError as e:
-            logger.error("kosin_transition_failed", error=str(e))
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_transition_failed", error=error_msg, error_type=type(e).__name__)
             return False
 
     async def add_comment(self, ticket_id: str, comment: str) -> bool:
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{self._api_base}/issue/{ticket_id}/comment",
                     headers=self._headers,
@@ -196,8 +237,13 @@ class KosinConnector(TicketConnector):
                 )
                 resp.raise_for_status()
                 return True
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            logger.error("kosin_comment_failed", error=f"HTTP {e.response.status_code}: {body}")
+            return False
         except httpx.HTTPError as e:
-            logger.error("kosin_comment_failed", error=str(e))
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_comment_failed", error=error_msg, error_type=type(e).__name__)
             return False
 
     async def get_board_issues(self) -> List[Dict]:
@@ -221,8 +267,13 @@ class KosinConnector(TicketConnector):
                 resp.raise_for_status()
                 data = resp.json()
                 return data.get("issues", [])
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            logger.error("kosin_board_issues_failed", error=f"HTTP {e.response.status_code}: {body}")
+            return []
         except httpx.HTTPError as e:
-            logger.error("kosin_board_issues_failed", error=str(e))
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_board_issues_failed", error=error_msg, error_type=type(e).__name__)
             return []
 
 
@@ -260,13 +311,13 @@ class MockKosinConnector(TicketConnector):
         logger.info("mock_kosin_ticket_created", key=key)
         return key, None
 
-    async def delete_ticket(self, ticket_id: str) -> bool:
+    async def delete_ticket(self, ticket_id: str) -> tuple[bool, Optional[str]]:
         if ticket_id in self.tickets:
             del self.tickets[ticket_id]
             self.comments.pop(ticket_id, None)
             logger.info("mock_kosin_ticket_deleted", key=ticket_id)
-            return True
-        return False
+            return True, None
+        return False, "Ticket not found in mock"
 
     async def update_status(self, ticket_id: str, status: str) -> bool:
         if ticket_id in self.tickets:

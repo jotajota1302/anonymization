@@ -31,6 +31,7 @@ async def list_tickets():
             id=t["id"],
             kosin_id=t["kosin_ticket_id"],
             source_system=t["source_system"],
+            source_ticket_id=t["source_ticket_id"],
             summary=t["summary"],
             status=t["status"],
             priority=t["priority"],
@@ -127,7 +128,7 @@ async def ingest_confirm(kosin_key: str):
     else:
         source_connector = state["jira_connector"]
 
-    # Check if already ingested
+    # Check if already ingested in DB
     existing = await db.get_ticket_by_source_key(kosin_key)
     if existing:
         return IngestConfirmResponse(
@@ -135,6 +136,20 @@ async def ingest_confirm(kosin_key: str):
             kosin_key=existing["kosin_ticket_id"],
             source_key=kosin_key,
             pii_entities_found=0,
+        )
+
+    # Check if [ANON] ticket already exists in KOSIN (DB was cleaned but KOSIN wasn't)
+    existing_kosin = await kosin.find_anon_ticket(kosin_key)
+    if existing_kosin:
+        logger.warning(
+            "kosin_anon_exists_no_db",
+            source_key=kosin_key,
+            existing_kosin=existing_kosin,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ya existe un ticket anonimizado en KOSIN ({existing_kosin}) para {kosin_key}. "
+                   f"Elimínalo desde Configuración antes de re-ingestar.",
         )
 
     # 1. Read full ticket from source system
@@ -184,8 +199,13 @@ async def ingest_confirm(kosin_key: str):
     if anon_comments_section:
         volcado_description += f"\n\n--- COMENTARIOS ANONIMIZADOS ---{anon_comments_section}"
 
+    # Jira limits summary to 255 characters
+    full_summary = f"[ANON] {anon_summary}"
+    if len(full_summary) > 255:
+        full_summary = full_summary[:252] + "..."
+
     kosin_id, create_error = await kosin.create_ticket(
-        summary=f"[ANON] {anon_summary}",
+        summary=full_summary,
         description=volcado_description,
         priority=priority,
         parent_key=parent_key if parent_key else None,
@@ -194,19 +214,28 @@ async def ingest_confirm(kosin_key: str):
     if not kosin_id:
         raise HTTPException(status_code=500, detail=f"Error creando ticket anonimizado en KOSIN: {create_error}")
 
-    # 5. Save to local DB
-    ticket_id = await db.create_ticket_mapping(
-        source_system=source_system_name,
-        source_ticket_id=kosin_key,
-        kosin_ticket_id=kosin_id,
-        summary=anon_summary,
-        anonymized_description=anon_description,
-        priority=priority.lower() if isinstance(priority, str) else "medium",
-    )
+    # 5. Save to local DB (with rollback if it fails)
+    try:
+        ticket_id = await db.create_ticket_mapping(
+            source_system=source_system_name,
+            source_ticket_id=kosin_key,
+            kosin_ticket_id=kosin_id,
+            summary=anon_summary,
+            anonymized_description=anon_description,
+            priority=priority.lower() if isinstance(priority, str) else "medium",
+        )
 
-    if sub_map:
-        encrypted = anonymizer.encrypt_map(sub_map, encryption_key)
-        await db.save_substitution_map(ticket_id, encrypted)
+        if sub_map:
+            encrypted = anonymizer.encrypt_map(sub_map, encryption_key)
+            await db.save_substitution_map(ticket_id, encrypted)
+    except Exception as e:
+        # Rollback: delete the KOSIN ticket we just created
+        logger.error("db_save_failed_rolling_back", kosin_id=kosin_id, error=str(e))
+        await kosin.delete_ticket(kosin_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error guardando en DB (ticket KOSIN {kosin_id} eliminado como rollback): {str(e)}",
+        )
 
     # 6. Audit log
     await db.add_audit_log(
@@ -224,11 +253,16 @@ async def ingest_confirm(kosin_key: str):
         tokens=list(sub_map.keys()),
     )
 
+    pii_warning = None
+    if not sub_map:
+        pii_warning = "No se detecto informacion sensible (PII) en este ticket. Se ha ingestado tal cual."
+
     return IngestConfirmResponse(
         ticket_id=ticket_id,
         kosin_key=kosin_id,
         source_key=kosin_key,
         pii_entities_found=len(sub_map),
+        pii_warning=pii_warning,
     )
 
 

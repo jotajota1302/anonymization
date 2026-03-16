@@ -2,6 +2,7 @@ export interface TicketSummary {
   id: number;
   kosin_id: string;
   source_system: string;
+  source_ticket_id: string;
   summary: string;
   status: "open" | "in_progress" | "resolved" | "closed";
   priority: "low" | "medium" | "high" | "critical";

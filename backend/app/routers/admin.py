@@ -31,15 +31,18 @@ async def delete_admin_ticket(kosin_key: str):
     if not mapping:
         raise HTTPException(status_code=404, detail=f"No mapping found for {kosin_key}")
 
-    # Delete from KOSIN
-    deleted_from_kosin = await kosin.delete_ticket(kosin_key)
+    # Delete from KOSIN (with subtasks)
+    deleted_from_kosin, kosin_error = await kosin.delete_ticket(kosin_key)
 
     # Delete from DB (always, even if KOSIN delete fails)
     await db.delete_ticket_mapping(mapping["id"])
 
-    logger.info("admin_ticket_deleted", kosin_key=kosin_key, from_kosin=deleted_from_kosin)
-    return {
+    logger.info("admin_ticket_deleted", kosin_key=kosin_key, from_kosin=deleted_from_kosin, kosin_error=kosin_error)
+    result = {
         "deleted": True,
         "kosin_key": kosin_key,
         "deleted_from_kosin": deleted_from_kosin,
     }
+    if kosin_error:
+        result["kosin_error"] = kosin_error
+    return result

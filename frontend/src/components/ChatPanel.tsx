@@ -197,15 +197,28 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between bg-white dark:bg-slate-800">
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">[ANON] {ticket.kosin_id}</h2>
-            <a
-              href={`${KOSIN_BASE}/${ticket.kosin_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 mt-1 text-xs font-medium text-primary hover:text-blue-600 transition-colors"
-            >
-              Ver Incidencia Anonimizada
-              <IconExternalLink />
-            </a>
+            <div className="flex items-center gap-3 mt-1">
+              <a
+                href={`${KOSIN_BASE}/${ticket.kosin_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-blue-600 transition-colors"
+              >
+                Ver Incidencia Anonimizada
+                <IconExternalLink />
+              </a>
+              {ticket.source_ticket_id && (
+                <a
+                  href={`${KOSIN_BASE}/${ticket.source_ticket_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
+                >
+                  Ver Ticket Origen
+                  <IconExternalLink />
+                </a>
+              )}
+            </div>
           </div>
           <div className="flex flex-col items-end gap-1.5">
             <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold rounded-lg uppercase">

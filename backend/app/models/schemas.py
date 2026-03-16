@@ -26,6 +26,7 @@ class TicketSummary(BaseModel):
     id: int
     kosin_id: str
     source_system: str
+    source_ticket_id: str
     summary: str
     status: TicketStatus = TicketStatus.OPEN
     priority: Priority = Priority.MEDIUM
@@ -118,6 +119,7 @@ class IngestConfirmResponse(BaseModel):
     kosin_key: str
     source_key: str
     pii_entities_found: int
+    pii_warning: Optional[str] = None
 
 
 # --- Audit ---

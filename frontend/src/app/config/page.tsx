@@ -992,166 +992,209 @@ export default function ConfigPage() {
             )}
 
             {/* ===== INTEGRATIONS TAB ===== */}
-            {activeTab === "integrations" && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className={h2Cls}>Sistemas Conectados</h2>
-                  <p className={descCls}>Gestiona las integraciones con sistemas de ticketing externos.</p>
-                </div>
-                <div className="space-y-3">
-                  {integrations.map((sys) => (
-                    <div key={sys.system_name} className={cardCls + " overflow-hidden"}>
-                      <div className="p-5 flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${systemBgColor(sys.system_name)}`}>
-                            {sys.display_name.slice(0, 2).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{sys.display_name}</p>
-                              <span className={`w-2 h-2 rounded-full ${statusDot(sys.last_connection_status)}`} />
-                              {sys.is_mock && <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">MOCK</span>}
-                              {!sys.is_active && <span className="px-1.5 py-0.5 text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded">INACTIVO</span>}
-                            </div>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">
-                              {timeAgo(sys.last_connection_test)} · {sys.connector_type.toUpperCase()}
-                              {sys.base_url ? ` · ${sys.base_url.replace(/https?:\/\//, "").split("/")[0]}` : ""}
-                            </p>
-                          </div>
-                        </div>
+            {activeTab === "integrations" && (() => {
+              const sourceIntegrations = integrations.filter(s => s.system_type === "source" || s.system_type === "both");
+              const destIntegrations = integrations.filter(s => s.system_type === "both" || s.system_type === "destination");
+
+              const renderIntegrationCard = (sys: IntegrationConfig, badge: { label: string; color: string }) => (
+                <div key={sys.system_name + badge.label} className={cardCls + " overflow-hidden"}>
+                  <div className="p-5 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${systemBgColor(sys.system_name)}`}>
+                        {sys.display_name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div>
                         <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleTest(sys.system_name)}
-                            disabled={testingSystem === sys.system_name}
-                            className="px-3 py-1.5 text-xs font-semibold text-primary border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors disabled:opacity-50"
-                          >
-                            {testingSystem === sys.system_name ? (
-                              <span className="flex items-center gap-1.5">
-                                <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                                Probando...
-                              </span>
-                            ) : "Probar Conexion"}
-                          </button>
-                          <button
-                            onClick={() => handleExpand(sys.system_name)}
-                            className="px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                          >
-                            {expandedSystem === sys.system_name ? "Cerrar" : "Gestionar"}
-                          </button>
+                          <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{sys.display_name}</p>
+                          <span className={`px-1.5 py-0.5 text-xs font-bold rounded ${badge.color}`}>{badge.label}</span>
+                          <span className={`w-2 h-2 rounded-full ${statusDot(sys.last_connection_status)}`} />
+                          {sys.is_mock && <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">MOCK</span>}
+                          {!sys.is_active && <span className="px-1.5 py-0.5 text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded">INACTIVO</span>}
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          {timeAgo(sys.last_connection_test)} · {sys.connector_type.toUpperCase()}
+                          {sys.base_url ? ` · ${sys.base_url.replace(/https?:\/\//, "").split("/")[0]}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleTest(sys.system_name)}
+                        disabled={testingSystem === sys.system_name}
+                        className="px-3 py-1.5 text-xs font-semibold text-primary border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors disabled:opacity-50"
+                      >
+                        {testingSystem === sys.system_name ? (
+                          <span className="flex items-center gap-1.5">
+                            <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                            Probando...
+                          </span>
+                        ) : "Probar Conexion"}
+                      </button>
+                      <button
+                        onClick={() => handleExpand(sys.system_name)}
+                        className="px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                      >
+                        {expandedSystem === sys.system_name ? "Cerrar" : "Gestionar"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Test result */}
+                  {testResult[sys.system_name] && (
+                    <div className={`mx-5 mb-3 px-3 py-2 rounded-lg text-xs font-medium ${
+                      testResult[sys.system_name].status === "connected"
+                        ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800"
+                        : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800"
+                    }`}>
+                      {testResult[sys.system_name].message}
+                    </div>
+                  )}
+
+                  {/* Expanded edit panel */}
+                  {expandedSystem === sys.system_name && (
+                    <div className="border-t border-slate-200 dark:border-slate-700 p-5 bg-slate-50/50 dark:bg-slate-900/50 space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className={labelCls}>URL Base</label>
+                          <input type="text" value={String(editForm.base_url || "")}
+                            onChange={(e) => setEditForm((f) => ({ ...f, base_url: e.target.value }))}
+                            placeholder="https://..." className={inputCls} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Token (dejar vacio para mantener actual)</label>
+                          <input type="password" value={String(editForm.auth_token || "")}
+                            onChange={(e) => setEditForm((f) => ({ ...f, auth_token: e.target.value }))}
+                            placeholder={sys.auth_token_masked} className={inputCls} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Email</label>
+                          <input type="email" value={String(editForm.auth_email || "")}
+                            onChange={(e) => setEditForm((f) => ({ ...f, auth_email: e.target.value }))}
+                            className={inputCls} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Proyecto</label>
+                          <input type="text" value={String(editForm.project_key || "")}
+                            onChange={(e) => setEditForm((f) => ({ ...f, project_key: e.target.value }))}
+                            className={inputCls} />
                         </div>
                       </div>
 
-                      {/* Test result */}
-                      {testResult[sys.system_name] && (
-                        <div className={`mx-5 mb-3 px-3 py-2 rounded-lg text-xs font-medium ${
-                          testResult[sys.system_name].status === "connected"
-                            ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800"
-                            : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800"
-                        }`}>
-                          {testResult[sys.system_name].message}
-                        </div>
-                      )}
-
-                      {/* Expanded edit panel */}
-                      {expandedSystem === sys.system_name && (
-                        <div className="border-t border-slate-200 dark:border-slate-700 p-5 bg-slate-50/50 dark:bg-slate-900/50 space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <label className={labelCls}>URL Base</label>
-                              <input type="text" value={String(editForm.base_url || "")}
-                                onChange={(e) => setEditForm((f) => ({ ...f, base_url: e.target.value }))}
-                                placeholder="https://..." className={inputCls} />
-                            </div>
-                            <div>
-                              <label className={labelCls}>Token (dejar vacio para mantener actual)</label>
-                              <input type="password" value={String(editForm.auth_token || "")}
-                                onChange={(e) => setEditForm((f) => ({ ...f, auth_token: e.target.value }))}
-                                placeholder={sys.auth_token_masked} className={inputCls} />
-                            </div>
-                            <div>
-                              <label className={labelCls}>Email</label>
-                              <input type="email" value={String(editForm.auth_email || "")}
-                                onChange={(e) => setEditForm((f) => ({ ...f, auth_email: e.target.value }))}
-                                className={inputCls} />
-                            </div>
-                            <div>
-                              <label className={labelCls}>Proyecto</label>
-                              <input type="text" value={String(editForm.project_key || "")}
-                                onChange={(e) => setEditForm((f) => ({ ...f, project_key: e.target.value }))}
-                                className={inputCls} />
-                            </div>
+                      {sys.connector_type === "jira" && (
+                        <div className="grid grid-cols-3 gap-4">
+                          <div>
+                            <label className={labelCls}>Board ID</label>
+                            <input type="text" value={String(editForm.board_id || "")}
+                              onChange={(e) => setEditForm((f) => ({ ...f, board_id: e.target.value }))}
+                              className={inputCls} />
                           </div>
-
-                          {sys.connector_type === "jira" && (
-                            <div className="grid grid-cols-3 gap-4">
-                              <div>
-                                <label className={labelCls}>Board ID</label>
-                                <input type="text" value={String(editForm.board_id || "")}
-                                  onChange={(e) => setEditForm((f) => ({ ...f, board_id: e.target.value }))}
-                                  className={inputCls} />
-                              </div>
-                              <div>
-                                <label className={labelCls}>Issue Type ID</label>
-                                <input type="text" value={String(editForm.issue_type_id || "")}
-                                  onChange={(e) => setEditForm((f) => ({ ...f, issue_type_id: e.target.value }))}
-                                  className={inputCls} />
-                              </div>
-                              <div>
-                                <label className={labelCls}>Parent Key</label>
-                                <input type="text" value={String(editForm.parent_key || "")}
-                                  onChange={(e) => setEditForm((f) => ({ ...f, parent_key: e.target.value }))}
-                                  className={inputCls} />
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="grid grid-cols-3 gap-4">
-                            <div>
-                              <label className={labelCls}>Polling (seg)</label>
-                              <input type="number" min={5}
-                                value={Number(editForm.polling_interval_sec || 60)}
-                                onChange={(e) => setEditForm((f) => ({ ...f, polling_interval_sec: Number(e.target.value) }))}
-                                className={inputCls} />
-                            </div>
-                            <div className="flex items-end gap-4">
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <button onClick={() => setEditForm((f) => ({ ...f, is_active: !f.is_active }))}
-                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_active ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}>
-                                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_active ? "left-[22px]" : "left-0.5"}`} />
-                                </button>
-                                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Activo</span>
-                              </label>
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <button onClick={() => setEditForm((f) => ({ ...f, is_mock: !f.is_mock }))}
-                                  className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_mock ? "bg-amber-400" : "bg-slate-300 dark:bg-slate-600"}`}>
-                                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_mock ? "left-[22px]" : "left-0.5"}`} />
-                                </button>
-                                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Mock</span>
-                              </label>
-                            </div>
+                          <div>
+                            <label className={labelCls}>Issue Type ID</label>
+                            <input type="text" value={String(editForm.issue_type_id || "")}
+                              onChange={(e) => setEditForm((f) => ({ ...f, issue_type_id: e.target.value }))}
+                              className={inputCls} />
                           </div>
-
-                          <div className="flex justify-end gap-2 pt-2">
-                            <button onClick={() => setExpandedSystem(null)}
-                              className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-white dark:hover:bg-slate-700 transition-colors">
-                              Cancelar
-                            </button>
-                            <button onClick={() => handleSave(sys.system_name)} disabled={saving} className={btnPrimary}>
-                              {saving ? "Guardando..." : "Guardar"}
-                            </button>
+                          <div>
+                            <label className={labelCls}>Parent Key</label>
+                            <input type="text" value={String(editForm.parent_key || "")}
+                              onChange={(e) => setEditForm((f) => ({ ...f, parent_key: e.target.value }))}
+                              className={inputCls} />
                           </div>
                         </div>
                       )}
-                    </div>
-                  ))}
-                  {integrations.length === 0 && (
-                    <div className={`${cardCls} p-10 text-center`}>
-                      <p className={descCls}>Cargando integraciones...</p>
+
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className={labelCls}>Polling (seg)</label>
+                          <input type="number" min={5}
+                            value={Number(editForm.polling_interval_sec || 60)}
+                            onChange={(e) => setEditForm((f) => ({ ...f, polling_interval_sec: Number(e.target.value) }))}
+                            className={inputCls} />
+                        </div>
+                        <div className="flex items-end gap-4">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <button onClick={() => setEditForm((f) => ({ ...f, is_active: !f.is_active }))}
+                              className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_active ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}>
+                              <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_active ? "left-[22px]" : "left-0.5"}`} />
+                            </button>
+                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Activo</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <button onClick={() => setEditForm((f) => ({ ...f, is_mock: !f.is_mock }))}
+                              className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_mock ? "bg-amber-400" : "bg-slate-300 dark:bg-slate-600"}`}>
+                              <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_mock ? "left-[22px]" : "left-0.5"}`} />
+                            </button>
+                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Mock</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button onClick={() => setExpandedSystem(null)}
+                          className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-white dark:hover:bg-slate-700 transition-colors">
+                          Cancelar
+                        </button>
+                        <button onClick={() => handleSave(sys.system_name)} disabled={saving} className={btnPrimary}>
+                          {saving ? "Guardando..." : "Guardar"}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
+              );
+
+              return (
+              <div className="space-y-8">
+                {/* --- Sistemas Origen --- */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                      <svg className="w-5 h-5 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h2 className={h2Cls}>Sistemas Origen</h2>
+                      <p className={descCls}>Sistemas de ticketing de los que se leen incidencias para anonimizar.</p>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {sourceIntegrations.length > 0 ? sourceIntegrations.map((sys) =>
+                      renderIntegrationCard(sys, { label: "ORIGEN", color: "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300" })
+                    ) : (
+                      <div className={`${cardCls} p-10 text-center`}>
+                        <p className={descCls}>No hay sistemas origen configurados</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* --- Sistemas Destino --- */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                      <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12M12 16.5V3" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h2 className={h2Cls}>Sistemas Destino</h2>
+                      <p className={descCls}>Sistemas donde se crean las copias anonimizadas de los tickets.</p>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {destIntegrations.length > 0 ? destIntegrations.map((sys) =>
+                      renderIntegrationCard(sys, { label: "DESTINO", color: "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300" })
+                    ) : (
+                      <div className={`${cardCls} p-10 text-center`}>
+                        <p className={descCls}>No hay sistemas destino configurados</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* ===== TICKETS TAB ===== */}
             {activeTab === "tickets" && (
@@ -1206,7 +1249,9 @@ export default function ConfigPage() {
                           const st = statusConfig[t.status] || { bg: "bg-slate-100 dark:bg-slate-700", text: "text-slate-600 dark:text-slate-300", label: t.status };
                           return (
                             <tr key={t.id} className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                              <td className="px-4 py-3 text-sm font-semibold text-primary">{t.kosin_ticket_id}</td>
+                              <td className="px-4 py-3 text-sm font-semibold">
+                                <a href={`/?ticket=${t.id}`} className="text-primary hover:underline">{t.kosin_ticket_id}</a>
+                              </td>
                               <td className="px-4 py-3">
                                 <span className="px-2 py-0.5 text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded uppercase">{t.source_system}</span>
                               </td>
