@@ -22,7 +22,7 @@ class RegexDetector(DetectionService):
     PATTERNS = {
         "EMAIL": re.compile(r'[\w.\-+]+@[\w.\-]+\.\w{2,}', re.IGNORECASE),
         "TELEFONO": re.compile(
-            r'(?:\+34|0034)?\s?[6-9]\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3}'
+            r'(?<!\d)(?:\+34|0034)?\s?[6-9]\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3}(?!\d)'
         ),
         "DNI": re.compile(r'\b[0-9XYZxyz]\d{7}[A-Za-z]\b'),
         "IP": re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'),
@@ -43,7 +43,7 @@ class RegexDetector(DetectionService):
             re.IGNORECASE
         ),
         "CODIGO_POSTAL": re.compile(
-            r'\b(?:0[1-9]|[1-4]\d|5[0-2])\d{3}\b'
+            r'(?:C\.?P\.?|[Cc]ódigo\s*[Pp]ostal|[Cc]odigo\s*[Pp]ostal)\s*:?\s*(?<!\d)((?:0[1-9]|[1-4]\d|5[0-2])\d{3})(?!\d)'
         ),
         "MATRICULA": re.compile(
             r'\b\d{4}[\s\-]?[B-DF-HJ-NP-TV-Z]{3}\b',
@@ -150,6 +150,58 @@ class PresidioDetector(DetectionService):
         "URL": "URL",
     }
 
+    # Minimum text length per entity type to reduce false positives
+    MIN_LENGTH = {
+        "PERSONA": 4,
+        "UBICACION": 5,
+        "ORGANIZACION": 4,
+    }
+
+    # Patterns that look like technical codes, not PII
+    _TECHNICAL_CODE = re.compile(
+        r'^[A-Z]{1,5}[-_]?\d{1,5}$'      # MOD_09, PT03, ERR01, V2, etc.
+        r'|^\d+\.\d+$'                     # 21.9, 3.14
+        r'|^[A-Z]{1,3}\d{2,5}$'           # PT03, AB123
+        r'|^[A-Z_]{2,10}$'                # XML, JSON, SI, NO, etc.
+        r'|^RITM\d+$'                      # ServiceNow/ITSM ticket refs
+        r'|^[A-Z]{2,10}\d{5,}$'           # RITM1406827, INC000001, etc.
+    )
+
+    # Common Spanish words that Presidio may misclassify as entities
+    _FALSE_POSITIVE_WORDS = {
+        # Determiners, prepositions, common words
+        "no", "si", "es", "al", "el", "la", "los", "las", "un", "una",
+        "del", "por", "para", "con", "sin", "que", "como", "bien", "mal",
+        "año", "mes", "dia", "hoy", "ayer", "todo", "nada", "algo",
+        # Generic field/form labels (not actual PII data)
+        "nombre", "dirección", "direccion", "domicilio", "apellido", "apellidos",
+        "teléfono", "telefono", "email", "correo", "fecha", "estado", "tipo",
+        "campo", "código", "codigo", "centro", "servicio", "servicios",
+        "empresa", "entidad", "cuenta", "número", "numero", "registro",
+        "cliente", "usuario", "operador", "sistema", "proceso", "modelo",
+        "descripción", "descripcion", "comentario", "observaciones", "nota",
+        # Common business/technical terms often misclassified
+        "gestión", "gestion", "actualizaciones", "actualizacion", "configuración",
+        "configuracion", "modificación", "modificacion", "retroactividad",
+        "factura", "facturación", "pedido", "sociedad", "convenio",
+        "extra", "marzo", "enero", "febrero", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+        "navidad", "paga", "pagas", "importe", "tabla", "tablas",
+        # Common Spanish verbs Presidio misclassifies
+        "llamó", "llamo", "indicó", "indico", "solicitó", "solicito",
+        "reportó", "reporto", "ejecutó", "ejecuto", "configuró", "configuro",
+        # Tech terms
+        "xml", "json", "html", "sql", "api", "url", "http", "https",
+        "sap", "sii", "basis", "abap", "fiori",
+    }
+
+    # Regex for generic field references like "Nombre(Dirección)", "Nombre 1"
+    _FIELD_LABEL_PATTERN = re.compile(
+        r'^(?:Nombre|Dirección|Direccion|Campo|Tipo|Estado|Código|Codigo)'
+        r'(?:\s*\d+|\s*\(.*\))?$',
+        re.IGNORECASE
+    )
+
     def __init__(self, model_name: str = "es_core_news_lg"):
         from presidio_analyzer import AnalyzerEngine
         from presidio_analyzer.nlp_engine import SpacyNlpEngine
@@ -163,19 +215,56 @@ class PresidioDetector(DetectionService):
         )
         self._model_name = model_name
 
+    def _is_false_positive(self, entity_text: str, entity_type: str) -> bool:
+        """Filter out obvious false positives from Presidio NER."""
+        stripped = entity_text.strip()
+        text_lower = stripped.lower()
+
+        # Common words that are never PII (check each word in the entity)
+        words = re.split(r'[\s()\[\],;:\-/]+', text_lower)
+        if all(w in self._FALSE_POSITIVE_WORDS or not w for w in words):
+            return True
+
+        # Field label patterns: "Nombre(Dirección)", "Nombre 1", etc.
+        if self._FIELD_LABEL_PATTERN.match(stripped):
+            return True
+
+        # Technical codes (MOD_09, PT03, ERR01, etc.) — match whole string or substring
+        if self._TECHNICAL_CODE.match(stripped):
+            return True
+        # Also check if entity contains a technical code (long phrases from Presidio)
+        if self._TECHNICAL_CODE.search(stripped):
+            return True
+
+        # Long phrases (>40 chars) from Presidio NER are almost always wrong
+        if entity_type in ("ORGANIZACION", "UBICACION", "PERSONA") and len(stripped) > 40:
+            return True
+
+        # Too short for NER-based types (PERSONA, UBICACION, ORGANIZACION)
+        min_len = self.MIN_LENGTH.get(entity_type, 0)
+        if min_len and len(stripped) < min_len:
+            return True
+
+        return False
+
     def detect(self, text: str) -> List[PiiEntity]:
         """Detect PII entities using Presidio NLP analysis."""
         results = self._analyzer.analyze(
             text=text,
             language="es",
-            score_threshold=0.4,
+            score_threshold=0.65,
         )
 
         entities = []
         for result in results:
             entity_type = self.TYPE_MAP.get(result.entity_type, result.entity_type)
+            entity_text = text[result.start:result.end]
+
+            if self._is_false_positive(entity_text, entity_type):
+                continue
+
             entities.append(PiiEntity(
-                text=text[result.start:result.end],
+                text=entity_text,
                 entity_type=entity_type,
                 start=result.start,
                 end=result.end,
