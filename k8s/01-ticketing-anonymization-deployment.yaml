@@ -5,18 +5,10 @@ metadata:
   labels:
     name: "production"
 ---
-apiVersion: "v1"
-kind: "Secret"
-metadata:
-  name: "ghcr-docker-registry-secret"
-  namespace: "alicante"
-type: "kubernetes.io/dockerconfigjson"
-data:
-  # Generar con: kubectl create secret docker-registry ghcr-docker-registry-secret \
-  #   --namespace=alicante --docker-server=ghcr.io \
-  #   --docker-username=jotajota1302 --docker-password=<GITHUB_PAT> \
-  #   --dry-run=client -o yaml | grep .dockerconfigjson | awk '{print $2}'
-  .dockerconfigjson: ""
+# NOTA: El secret del registry de GHCR se crea manualmente con:
+#   kubectl create secret docker-registry ghcr-docker-registry-secret \
+#     --namespace=alicante --docker-server=ghcr.io \
+#     --docker-username=jotajota1302 --docker-password=<GITHUB_PAT>
 ---
 apiVersion: "v1"
 kind: "Secret"
@@ -109,29 +101,12 @@ spec:
       - name: "ticketing-anonymization-data-volume"
         persistentVolumeClaim:
           claimName: "ticketing-anonymization-data"
-      initContainers:
-      - name: "init-chmod-data"
-        image: "bitnami/minideb:latest"
-        volumeMounts:
-        - name: "ticketing-anonymization-data-volume"
-          mountPath: "/app/data"
-        resources:
-          requests:
-            cpu: "50m"
-            memory: "25Mi"
-          limits:
-            cpu: "50m"
-            memory: "25Mi"
-        terminationMessagePath: "/dev/termination-log"
-        terminationMessagePolicy: "File"
-        imagePullPolicy: "IfNotPresent"
-        command:
-        - "sh"
-        - "-c"
-        - "chown -R 1000:1000 /app/data\nif [ -d /app/data ]; then\n  chmod 0700 /app/data;\n\
-          fi\n"
-        securityContext:
-          runAsUser: 0
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: "RuntimeDefault"
       containers:
       - name: "ticketing-anonymization-backend-container"
         image: "ghcr.io/jotajota1302/anonymization-backend:latest"
@@ -208,14 +183,15 @@ spec:
         terminationMessagePath: "/dev/termination-log"
         imagePullPolicy: "Always"
         securityContext:
-          privileged: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
       restartPolicy: "Always"
       terminationGracePeriodSeconds: 30
       dnsPolicy: "ClusterFirst"
       imagePullSecrets:
       - name: "ghcr-docker-registry-secret"
-      securityContext:
-        runAsUser: 1000
 ---
 apiVersion: "apps/v1"
 kind: "Deployment"
@@ -238,6 +214,11 @@ spec:
         deptapp-name: "Ticketing_Anonymization"
         name: "ticketing-anonymization-frontend"
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: "RuntimeDefault"
       containers:
       - name: "ticketing-anonymization-frontend-container"
         image: "ghcr.io/jotajota1302/anonymization-frontend:latest"
@@ -269,11 +250,12 @@ spec:
         terminationMessagePath: "/dev/termination-log"
         imagePullPolicy: "Always"
         securityContext:
-          privileged: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
       restartPolicy: "Always"
       terminationGracePeriodSeconds: 30
       dnsPolicy: "ClusterFirst"
       imagePullSecrets:
       - name: "ghcr-docker-registry-secret"
-      securityContext:
-        runAsUser: 1000
