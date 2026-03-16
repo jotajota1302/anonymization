@@ -15,6 +15,8 @@ async def search_tickets(jql_query: str, max_results: int = 20) -> str:
         max_results: Numero maximo de resultados (default 20, max 50)
     """
     from ..main import app_state
+    from ..services.anonymizer import Anonymizer
+    from ..services.detection import CompositeDetector
 
     connector_router = app_state.get("connector_router")
     max_results = min(max_results, 50)
@@ -53,13 +55,27 @@ async def search_tickets(jql_query: str, max_results: int = 20) -> str:
     if not issues and not errors:
         return f"No se encontraron tickets para la consulta: {jql_query}"
 
+    # Anonymize summaries to prevent PII leaks in search results
+    try:
+        detector = app_state.get("detector") or CompositeDetector()
+        anonymizer = Anonymizer(detector=detector)
+    except Exception:
+        from ..services.detection import RegexDetector
+        anonymizer = Anonymizer(detector=RegexDetector())
+
     lines = [f"Resultados ({len(issues)} tickets):\n"]
+    lines.append("| Ticket | Sistema | Estado | Prioridad | Resumen |")
+    lines.append("|--------|---------|--------|-----------|---------|")
     for issue in issues[:max_results]:
         src = issue.get("source_system", "").upper()
-        lines.append(
-            f"- **{issue['key']}** [{src}] | {issue.get('status', 'N/A')} | "
-            f"{issue.get('priority', 'N/A')} | {issue.get('summary', 'Sin resumen')}"
-        )
+        key = issue.get("key", "?")
+        status = issue.get("status", "N/A")
+        priority = issue.get("priority", "N/A")
+        raw_summary = issue.get("summary", "Sin resumen")
+        # Anonymize the summary — discard the sub_map (we don't need reverse mapping)
+        safe_summary, _ = anonymizer.anonymize(raw_summary)
+        safe_summary = safe_summary.replace("|", "-")
+        lines.append(f"| **{key}** | {src} | {status} | {priority} | {safe_summary} |")
 
     if errors:
         lines.append(f"\n(Errores en {len(errors)} sistema(s): {', '.join(e['_error'] for e in errors)})")

@@ -89,6 +89,26 @@ function AgentContent({ content }: { content: string }) {
           code: ({ children }) => (
             <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded text-xs font-mono">{children}</code>
           ),
+          table: ({ children }) => (
+            <div className="overflow-x-auto my-3 rounded-lg border border-slate-200 dark:border-slate-700">
+              <table className="min-w-full text-xs">{children}</table>
+            </div>
+          ),
+          thead: ({ children }) => (
+            <thead className="bg-slate-100 dark:bg-slate-700/60">{children}</thead>
+          ),
+          th: ({ children }) => (
+            <th className="px-3 py-2 text-left font-bold text-slate-700 dark:text-slate-200 whitespace-nowrap">{children}</th>
+          ),
+          td: ({ children }) => {
+            if (typeof children === "string") {
+              return <td className="px-3 py-2 text-slate-600 dark:text-slate-300 border-t border-slate-100 dark:border-slate-700/50">{renderInlineTokens(children)}</td>;
+            }
+            return <td className="px-3 py-2 text-slate-600 dark:text-slate-300 border-t border-slate-100 dark:border-slate-700/50">{children}</td>;
+          },
+          tr: ({ children }) => (
+            <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">{children}</tr>
+          ),
         }}
       >
         {cleaned}
