@@ -17,15 +17,10 @@ metadata:
   namespace: "alicante"
 type: "Opaque"
 data:
-  # Valores placeholder — reemplazar con los reales: echo -n "valor" | base64
+  # Solo secretos de infraestructura. LLM, integraciones, origenes se configuran desde /config
+  # Generar: python -c "from cryptography.hazmat.primitives.ciphers.aead import AESGCM; import base64; print(base64.b64encode(AESGCM.generate_key(256)).decode())"
+  # Codificar: echo -n "valor" | base64
   ENCRYPTION_KEY: "Q0hBTkdFX01FX2dlbmVyYXRlX3dpdGhfcHl0aG9uX2Zlcm5ldA=="
-  LLM_PROVIDER: "b3BlbmFp"
-  OPENAI_API_KEY: "c2stQ0hBTkdFLU1F"
-  OPENAI_MODEL: "Z3B0LTRvLW1pbmk="
-  KOSIN_URL: "aHR0cHM6Ly91bWFuZS5lbWVhbC5udHRkYXRhLmNvbS9qaXJhaXRv"
-  KOSIN_TOKEN: "Q0hBTkdFLU1FLXRva2Vu"
-  KOSIN_EMAIL: "dXNlckBlbWVhbC5udHRkYXRhLmNvbQ=="
-  KOSIN_PROJECT_KEY: "R0RORVNQQUlO"
 ---
 apiVersion: "v1"
 kind: "PersistentVolumeClaim"
@@ -116,57 +111,15 @@ spec:
         env:
         - name: "TZ"
           value: "Europe/Madrid"
-        - name: "DATABASE_PATH"
+        - name: "DB_PATH"
           value: "/app/data/ticketing.db"
         - name: "ENCRYPTION_KEY"
           valueFrom:
             secretKeyRef:
               name: "ticketing-anonymization-secret"
               key: "ENCRYPTION_KEY"
-        - name: "LLM_PROVIDER"
-          valueFrom:
-            secretKeyRef:
-              name: "ticketing-anonymization-secret"
-              key: "LLM_PROVIDER"
-        - name: "OPENAI_API_KEY"
-          valueFrom:
-            secretKeyRef:
-              name: "ticketing-anonymization-secret"
-              key: "OPENAI_API_KEY"
-        - name: "OPENAI_MODEL"
-          valueFrom:
-            secretKeyRef:
-              name: "ticketing-anonymization-secret"
-              key: "OPENAI_MODEL"
-        - name: "KOSIN_URL"
-          valueFrom:
-            secretKeyRef:
-              name: "ticketing-anonymization-secret"
-              key: "KOSIN_URL"
-        - name: "KOSIN_TOKEN"
-          valueFrom:
-            secretKeyRef:
-              name: "ticketing-anonymization-secret"
-              key: "KOSIN_TOKEN"
-        - name: "KOSIN_EMAIL"
-          valueFrom:
-            secretKeyRef:
-              name: "ticketing-anonymization-secret"
-              key: "KOSIN_EMAIL"
-        - name: "KOSIN_PROJECT_KEY"
-          valueFrom:
-            secretKeyRef:
-              name: "ticketing-anonymization-secret"
-              key: "KOSIN_PROJECT_KEY"
-        - name: "ACTIVE_SOURCES"
-          value: "stdvert1"
-        - name: "SOURCE_PROJECT"
-          value: "STDVERT1"
-        - name: "KOSIN_PROJECT"
-          valueFrom:
-            secretKeyRef:
-              name: "ticketing-anonymization-secret"
-              key: "KOSIN_PROJECT_KEY"
+        - name: "CORS_ORIGINS"
+          value: '["https://ticketing-anonymization.alicante.deptapps.everis.cloud"]'
         volumeMounts:
         - name: "ticketing-anonymization-data-volume"
           mountPath: "/app/data"
