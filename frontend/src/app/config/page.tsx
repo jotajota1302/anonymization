@@ -148,7 +148,7 @@ export default function ConfigPage() {
 
   // Agent settings state
   const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null);
-  const [agentProvider, setAgentProvider] = useState("ollama");
+  const [agentProvider, setAgentProvider] = useState("openai");
   const [agentModel, setAgentModel] = useState("");
   const [agentTemp, setAgentTemp] = useState(0.3);
   const [agentPrompt, setAgentPrompt] = useState("");
@@ -549,7 +549,7 @@ export default function ConfigPage() {
   const activeToolsCount = agentTools.filter((t) => t.enabled).length;
   const promptModified = agentPrompt !== agentPromptSaved;
 
-  const ollamaModels = agentConfig?.ollama_config?.available_models || [];
+  // ollama_config kept in backend but hidden from UI
   const tempLabel = agentTemp <= 0.2 ? "Preciso" : agentTemp <= 0.5 ? "Equilibrado" : agentTemp <= 0.8 ? "Creativo" : "Experimental";
 
   return (
@@ -642,19 +642,15 @@ export default function ConfigPage() {
                   <p className={`${descCls} mb-4`}>Configura el LLM que usa el agente de anonimizacion.</p>
 
                   {/* Provider radio cards */}
-                  <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="grid grid-cols-2 gap-3 mb-4">
                     {[
-                      { id: "ollama", title: "Ollama", desc: "Desarrollo local", bgColor: "bg-green-600" },
                       { id: "openai", title: "OpenAI", desc: "API directa GPT", bgColor: "bg-slate-800 dark:bg-slate-600" },
                       { id: "axet", title: "Axet NTT", desc: "Proxy corporativo", bgColor: "bg-purple-600" },
                     ].map((p) => (
                       <button key={p.id} onClick={() => {
                         setAgentProvider(p.id);
                         setConnectionResult(null);
-                        if (p.id === "ollama") {
-                          const models = agentConfig?.ollama_config?.available_models || [];
-                          setAgentModel(models[0] || "minimax-m2:cloud");
-                        } else if (p.id === "openai") {
+                        if (p.id === "openai") {
                           setAgentModel(agentConfig?.openai_config?.model || "gpt-4o-mini");
                         } else if (p.id === "axet") {
                           setAgentModel(agentConfig?.axet_config?.model || "gpt-4o-mini");
@@ -667,9 +663,7 @@ export default function ConfigPage() {
                         }`}>
                         <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${p.bgColor}`}>
-                            {p.id === "ollama" ? (
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="3"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="16" x2="13" y2="16"/></svg>
-                            ) : p.id === "openai" ? (
+                            {p.id === "openai" ? (
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z"/><path d="M8 12l2 2 4-4"/></svg>
                             ) : p.id === "axet" ? (
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
@@ -693,28 +687,7 @@ export default function ConfigPage() {
 
                   {/* Model selection */}
                   <div className={`${cardCls} p-5 space-y-4`}>
-                    {agentProvider === "ollama" ? (
-                      <>
-                        <div>
-                          <label className={labelCls}>Modelo</label>
-                          <select value={agentModel} onChange={(e) => setAgentModel(e.target.value)} className={inputCls}>
-                            {ollamaModels.length > 0 ? (
-                              ollamaModels.map((m) => <option key={m} value={m}>{m}</option>)
-                            ) : (
-                              <option value={agentModel}>{agentModel}</option>
-                            )}
-                          </select>
-                          {ollamaModels.length === 0 && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">No se pudo conectar con Ollama para listar modelos</p>
-                          )}
-                        </div>
-                        <div>
-                          <label className={labelCls}>URL Base Ollama</label>
-                          <input type="text" value={agentConfig?.ollama_config?.base_url || ""} disabled className={`${inputCls} opacity-60`} />
-                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Configurado via variable de entorno OLLAMA_BASE_URL</p>
-                        </div>
-                      </>
-                    ) : agentProvider === "openai" ? (
+                    {agentProvider === "openai" ? (
                       <>
                         <div>
                           <label className={labelCls}>Modelo</label>
