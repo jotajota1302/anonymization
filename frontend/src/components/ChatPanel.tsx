@@ -81,11 +81,11 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
   const [isSyncing, setIsSyncing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { chatMessages, streamingContent, isStreaming, isIngesting, tickets, suggestedChips, piiWarnings } = useAppStore();
+  const { chatMessages, isStreaming, isIngesting, tickets, suggestedChips, piiWarnings } = useAppStore();
   const messages = ticketId ? chatMessages[ticketId] || [] : [];
   const ticket = tickets.find((t) => t.id === ticketId);
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, streamingContent]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, isStreaming]);
 
   const handleSend = (text?: string, isChip: boolean = false) => {
     const msg = (text || input).trim();
@@ -199,7 +199,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
   const statusLabels: Record<string, string> = { open: "Pendiente", in_progress: "En Progreso", resolved: "Resuelto", closed: "Cerrado" };
   const pLabels: Record<string, string> = { critical: "Critica", high: "Alta", medium: "Media", low: "Baja" };
   const pColors: Record<string, string> = { critical: "#EF4444", high: "#F59E0B", medium: "#3B82F6", low: "#10B981" };
-  const isThinking = isStreaming && !streamingContent;
+  const isThinking = isStreaming;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -255,7 +255,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
 
       {/* Chat messages */}
       <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-50/50 dark:bg-slate-900" role="log" aria-label="Historial de chat" aria-live="polite">
-        {messages.length === 0 && !isThinking && !streamingContent && (
+        {messages.length === 0 && !isThinking && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <IconChat size={48} className="text-slate-300 dark:text-slate-600 mx-auto mb-3" />
@@ -272,27 +272,15 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
               <IconAgent className="text-primary" />
             </div>
             <div className="bg-white dark:bg-slate-800 border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4">
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+              <div className="flex items-center gap-3">
+                <svg className="animate-spin w-4 h-4 text-primary shrink-0" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <div>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Procesando y anonimizando respuesta</span>
+                  <span className="block text-xs text-slate-400 dark:text-slate-500 mt-0.5">Verificando que no contenga datos personales...</span>
                 </div>
-                <span className="text-xs text-slate-400 dark:text-slate-500">Analizando...</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {streamingContent && (
-          <div className="flex gap-4 max-w-[85%] mb-6">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
-              <IconAgent className="text-primary" />
-            </div>
-            <div className="bg-white dark:bg-slate-800 border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4">
-              <div className="text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
-                {streamingContent.replace(/\[CHIPS[:\s].*?\]/gs, "").replace(/\[CHIPS[:\s].*$/s, "").trim()}
-                <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 rounded-full" />
               </div>
             </div>
           </div>

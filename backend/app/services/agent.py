@@ -261,7 +261,12 @@ Ejemplos segun contexto:
 
 
 class StreamingCallback(AsyncCallbackHandler):
-    """Callback handler that streams tokens via WebSocket."""
+    """Callback handler that collects tokens without streaming to client.
+
+    Tokens are NOT sent to the frontend during generation to prevent
+    showing unanonymized content. The complete, filtered response is
+    sent only after post-LLM PII filtering via send_complete().
+    """
 
     def __init__(self, ws_manager: ConnectionManager, client_id: str, ticket_id: int = None):
         self.ws_manager = ws_manager
@@ -271,7 +276,6 @@ class StreamingCallback(AsyncCallbackHandler):
 
     async def on_llm_new_token(self, token: str, **kwargs):
         self.tokens.append(token)
-        await self.ws_manager.send_token(self.client_id, token, self.ticket_id)
 
     def get_full_response(self) -> str:
         return "".join(self.tokens)
