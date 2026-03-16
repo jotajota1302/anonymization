@@ -150,8 +150,29 @@ class AttachmentProcessor:
             logger.error("image_analysis_failed", error=str(e))
             return []
 
+    # Prompt que instruye al LLM a analizar la imagen SIN devolver PII
+    IMAGE_ANALYSIS_PROMPT = """Analiza esta imagen y describe su contenido.
+
+REGLAS CRITICAS DE PRIVACIDAD — NUNCA incluyas en tu respuesta:
+- Nombres de personas (reemplazar por [NOMBRE])
+- Numeros de documento, DNI, pasaporte, NIE (reemplazar por [DOCUMENTO])
+- Fechas de nacimiento (reemplazar por [FECHA_NACIMIENTO])
+- Direcciones postales (reemplazar por [DIRECCION])
+- Numeros de telefono (reemplazar por [TELEFONO])
+- Emails (reemplazar por [EMAIL])
+- Numeros de cuenta, tarjeta de credito (reemplazar por [CUENTA])
+- Matriculas de vehiculos (reemplazar por [MATRICULA])
+- Cualquier otro dato que identifique a una persona (reemplazar por [PII])
+
+Tu respuesta debe incluir:
+1. TIPO DE DOCUMENTO: Que tipo de imagen/documento es (DNI, pasaporte, factura, captura de pantalla, foto, etc.)
+2. PII DETECTADO: Lista de tipos de datos personales encontrados (sin revelar los valores)
+3. CONTENIDO SEGURO: Descripcion del contenido con todos los datos personales reemplazados por los tokens indicados arriba
+
+NUNCA reveles el valor real de ningun dato personal. Esta es una aplicacion GDPR-compliant."""
+
     def _extract_image(self, content: bytes) -> str:
-        """Extract text from image using LLM vision API."""
+        """Analyze image using LLM vision API with PII redaction."""
         try:
             from ..config import settings
             b64_image = base64.b64encode(content).decode("utf-8")
@@ -165,24 +186,27 @@ class AttachmentProcessor:
             elif content[:2] == b'BM':
                 mime = "image/bmp"
 
+            prompt = self.IMAGE_ANALYSIS_PROMPT
+            messages = [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}}
+            ]}]
+
             if settings.llm_provider == "openai":
                 import httpx
                 response = httpx.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {settings.openai_api_key}"},
                     json={
-                        "model": settings.openai_model if "vision" in settings.openai_model or "4o" in settings.openai_model else "gpt-4o-mini",
-                        "messages": [{"role": "user", "content": [
-                            {"type": "text", "text": "Extrae todo el texto visible en esta imagen. Devuelve solo el texto extraido, sin comentarios ni explicaciones."},
-                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}}
-                        ]}],
+                        "model": settings.openai_model if "4o" in settings.openai_model else "gpt-4o-mini",
+                        "messages": messages,
                         "max_tokens": 4096,
                     },
                     timeout=60,
                 )
                 response.raise_for_status()
                 text = response.json()["choices"][0]["message"]["content"]
-                logger.info("image_text_extracted_via_llm", length=len(text))
+                logger.info("image_analyzed_via_llm", length=len(text))
                 return text.strip()
 
             elif settings.llm_provider == "azure":
@@ -191,25 +215,22 @@ class AttachmentProcessor:
                     f"{settings.azure_openai_endpoint}/openai/deployments/{settings.azure_openai_deployment}/chat/completions?api-version={settings.azure_openai_api_version}",
                     headers={"api-key": settings.azure_openai_key},
                     json={
-                        "messages": [{"role": "user", "content": [
-                            {"type": "text", "text": "Extrae todo el texto visible en esta imagen. Devuelve solo el texto extraido, sin comentarios ni explicaciones."},
-                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}}
-                        ]}],
+                        "messages": messages,
                         "max_tokens": 4096,
                     },
                     timeout=60,
                 )
                 response.raise_for_status()
                 text = response.json()["choices"][0]["message"]["content"]
-                logger.info("image_text_extracted_via_azure", length=len(text))
+                logger.info("image_analyzed_via_azure", length=len(text))
                 return text.strip()
 
             else:
-                return "[Extraccion de texto de imagenes requiere LLM_PROVIDER openai o azure con soporte vision]"
+                return "[Analisis de imagenes requiere LLM_PROVIDER openai o azure con soporte vision]"
 
         except Exception as e:
-            logger.error("llm_image_extraction_failed", error=str(e))
-            return f"[Error extraccion imagen: {e}]"
+            logger.error("llm_image_analysis_failed", error=str(e))
+            return f"[Error analisis imagen: {e}]"
 
     def _extract_pdf(self, content: bytes) -> str:
         try:
