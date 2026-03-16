@@ -299,6 +299,15 @@ class DatabaseService:
                 tuple(vals)
             )
 
+    async def delete_system_config(self, name: str) -> bool:
+        existing = await self.get_system_config(name)
+        if not existing:
+            return False
+        await self.execute(
+            "DELETE FROM system_config WHERE system_name = ?", (name,)
+        )
+        return True
+
     async def update_connection_status(self, name: str, status: str, error: Optional[str] = None) -> None:
         await self.execute(
             "UPDATE system_config SET last_connection_test = ?, last_connection_status = ?, last_connection_error = ? WHERE system_name = ?",

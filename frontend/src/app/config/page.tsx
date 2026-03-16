@@ -140,6 +140,14 @@ export default function ConfigPage() {
   const [testingSystem, setTestingSystem] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { status: string; message: string }>>({});
   const [saving, setSaving] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newIntegration, setNewIntegration] = useState({
+    system_name: "", display_name: "", system_type: "source", connector_type: "jira",
+    base_url: "", auth_token: "", auth_email: "", project_key: "", is_active: true,
+  });
+  const [addingIntegration, setAddingIntegration] = useState(false);
+  const [deletingIntegration, setDeletingIntegration] = useState<string | null>(null);
+  const [confirmDeleteIntegration, setConfirmDeleteIntegration] = useState<string | null>(null);
 
   // General settings state
   const [pollingInterval, setPollingInterval] = useState(60);
@@ -386,6 +394,49 @@ export default function ConfigPage() {
       setTestResult((prev) => ({ ...prev, [systemName]: { status: "error", message: "Error de red" } }));
     } finally {
       setTestingSystem(null);
+    }
+  };
+
+  const handleAddIntegration = async () => {
+    if (!newIntegration.system_name.trim() || !newIntegration.display_name.trim()) return;
+    setAddingIntegration(true);
+    try {
+      const res = await fetch(`${API_URL}/api/config/integrations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newIntegration),
+      });
+      if (res.ok) {
+        await fetchIntegrations();
+        setShowAddForm(false);
+        setNewIntegration({
+          system_name: "", display_name: "", system_type: "source", connector_type: "jira",
+          base_url: "", auth_token: "", auth_email: "", project_key: "", is_active: true,
+        });
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Error al crear integracion");
+      }
+    } catch (err) {
+      console.error("Failed to add integration:", err);
+    } finally {
+      setAddingIntegration(false);
+    }
+  };
+
+  const handleDeleteIntegration = async (name: string) => {
+    setDeletingIntegration(name);
+    try {
+      const res = await fetch(`${API_URL}/api/config/integrations/${name}`, { method: "DELETE" });
+      if (res.ok) {
+        await fetchIntegrations();
+        if (expandedSystem === name) setExpandedSystem(null);
+      }
+    } catch (err) {
+      console.error("Failed to delete integration:", err);
+    } finally {
+      setDeletingIntegration(null);
+      setConfirmDeleteIntegration(null);
     }
   };
 
@@ -1278,6 +1329,27 @@ export default function ConfigPage() {
                       >
                         {expandedSystem === sys.system_name ? "Cerrar" : "Gestionar"}
                       </button>
+                      {confirmDeleteIntegration === sys.system_name ? (
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => handleDeleteIntegration(sys.system_name)}
+                            disabled={deletingIntegration === sys.system_name}
+                            className="px-2 py-1.5 text-xs font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50">
+                            {deletingIntegration === sys.system_name ? "..." : "Eliminar"}
+                          </button>
+                          <button onClick={() => setConfirmDeleteIntegration(null)}
+                            className="px-2 py-1.5 text-xs font-semibold text-slate-500 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700">
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDeleteIntegration(sys.system_name)}
+                          className="p-1.5 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                          title="Eliminar integracion"
+                        >
+                          <IconTrash />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1427,6 +1499,84 @@ export default function ConfigPage() {
                     )}
                   </div>
                 </div>
+
+                {/* --- Añadir integracion --- */}
+                {!showAddForm ? (
+                  <button onClick={() => setShowAddForm(true)}
+                    className="w-full py-3 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl text-sm font-semibold text-slate-500 dark:text-slate-400 hover:border-primary hover:text-primary transition-colors">
+                    + Añadir integracion
+                  </button>
+                ) : (
+                  <div className={cardCls + " p-5 space-y-4"}>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Nueva integracion</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className={labelCls}>Identificador (sin espacios)</label>
+                        <input type="text" value={newIntegration.system_name} placeholder="mi-jira-prod"
+                          onChange={(e) => setNewIntegration(p => ({ ...p, system_name: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") }))}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Nombre visible</label>
+                        <input type="text" value={newIntegration.display_name} placeholder="Jira Produccion"
+                          onChange={(e) => setNewIntegration(p => ({ ...p, display_name: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Tipo de sistema</label>
+                        <select value={newIntegration.system_type}
+                          onChange={(e) => setNewIntegration(p => ({ ...p, system_type: e.target.value }))}
+                          className={inputCls}>
+                          <option value="source">Origen</option>
+                          <option value="destination">Destino</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className={labelCls}>Tipo de conector</label>
+                        <select value={newIntegration.connector_type}
+                          onChange={(e) => setNewIntegration(p => ({ ...p, connector_type: e.target.value }))}
+                          className={inputCls}>
+                          <option value="jira">Jira</option>
+                          <option value="remedy">Remedy</option>
+                          <option value="servicenow">ServiceNow</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className={labelCls}>URL Base</label>
+                        <input type="text" value={newIntegration.base_url} placeholder="https://jira.example.com"
+                          onChange={(e) => setNewIntegration(p => ({ ...p, base_url: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Proyecto</label>
+                        <input type="text" value={newIntegration.project_key} placeholder="MYPROJECT"
+                          onChange={(e) => setNewIntegration(p => ({ ...p, project_key: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Token</label>
+                        <input type="password" value={newIntegration.auth_token} placeholder="Bearer token"
+                          onChange={(e) => setNewIntegration(p => ({ ...p, auth_token: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Email</label>
+                        <input type="email" value={newIntegration.auth_email} placeholder="usuario@empresa.com"
+                          onChange={(e) => setNewIntegration(p => ({ ...p, auth_email: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button onClick={() => setShowAddForm(false)}
+                        className="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-white dark:hover:bg-slate-700 transition-colors">
+                        Cancelar
+                      </button>
+                      <button onClick={handleAddIntegration} disabled={addingIntegration || !newIntegration.system_name || !newIntegration.display_name} className={btnPrimary}>
+                        {addingIntegration ? "Creando..." : "Crear integracion"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               );
             })()}

@@ -62,6 +62,87 @@ async def get_integration(name: str):
     return _serialize_config(row)
 
 
+class IntegrationCreate(BaseModel):
+    system_name: str
+    display_name: str
+    system_type: str = "source"  # "source" or "destination"
+    connector_type: str = "jira"  # "jira", "remedy", "servicenow"
+    base_url: str = ""
+    auth_token: str = ""
+    auth_email: str = ""
+    project_key: str = ""
+    extra_config: Optional[dict] = None
+    is_active: bool = True
+    polling_interval_sec: int = 60
+
+
+@router.post("/integrations")
+async def create_integration(body: IntegrationCreate):
+    db = _get_app_state().get("db")
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    # Check name doesn't already exist
+    existing = await db.get_system_config(body.system_name)
+    if existing:
+        raise HTTPException(status_code=409, detail=f"La integracion '{body.system_name}' ya existe")
+
+    # Reserved names
+    if body.system_name in ("anonymization", "agent", "general"):
+        raise HTTPException(status_code=400, detail="Nombre reservado para configuracion interna")
+
+    import json as _json
+    await db.upsert_system_config(
+        body.system_name,
+        display_name=body.display_name,
+        system_type=body.system_type,
+        connector_type=body.connector_type,
+        base_url=body.base_url,
+        auth_token=body.auth_token,
+        auth_email=body.auth_email,
+        project_key=body.project_key,
+        extra_config=_json.dumps(body.extra_config or {}),
+        is_active=int(body.is_active),
+        is_mock=0,
+        polling_interval_sec=body.polling_interval_sec,
+    )
+
+    # Hot-reload connectors
+    try:
+        from ..main import reload_connectors
+        await reload_connectors(db)
+        logger.info("connectors_hot_reloaded", trigger=f"create:{body.system_name}")
+    except Exception as e:
+        logger.error("connectors_hot_reload_failed", error=str(e))
+
+    row = await db.get_system_config(body.system_name)
+    return _serialize_config(row)
+
+
+@router.delete("/integrations/{name}")
+async def delete_integration(name: str):
+    db = _get_app_state().get("db")
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    if name in ("anonymization", "agent", "general"):
+        raise HTTPException(status_code=400, detail="No se puede eliminar configuracion interna")
+
+    deleted = await db.delete_system_config(name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Integration '{name}' not found")
+
+    # Hot-reload connectors
+    try:
+        from ..main import reload_connectors
+        await reload_connectors(db)
+        logger.info("connectors_hot_reloaded", trigger=f"delete:{name}")
+    except Exception as e:
+        logger.error("connectors_hot_reload_failed", error=str(e))
+
+    return {"status": "deleted", "system_name": name}
+
+
 class IntegrationUpdate(BaseModel):
     display_name: Optional[str] = None
     base_url: Optional[str] = None
