@@ -276,6 +276,121 @@ class KosinConnector(TicketConnector):
             logger.error("kosin_board_issues_failed", error=error_msg, error_type=type(e).__name__)
             return []
 
+    async def search_issues(self, jql: str, max_results: int = 50) -> List[Dict]:
+        """Search issues using JQL query via REST API."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{self._api_base}/search",
+                    headers=self._headers,
+                    json={
+                        "jql": jql,
+                        "maxResults": max_results,
+                        "fields": ["summary", "status", "priority", "issuetype", "created", "assignee"],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                issues = []
+                for item in data.get("issues", []):
+                    fields = item.get("fields", {})
+                    issues.append({
+                        "key": item["key"],
+                        "summary": fields.get("summary", ""),
+                        "status": fields.get("status", {}).get("name", "Unknown"),
+                        "priority": fields.get("priority", {}).get("name", "Medium"),
+                        "issuetype": fields.get("issuetype", {}).get("name", ""),
+                        "created": fields.get("created", ""),
+                        "assignee": fields.get("assignee", {}).get("displayName", "") if fields.get("assignee") else "",
+                    })
+                return issues
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            logger.error("kosin_search_failed", error=f"HTTP {e.response.status_code}: {body}")
+            return []
+        except httpx.HTTPError as e:
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_search_failed", error=error_msg, error_type=type(e).__name__)
+            return []
+
+    async def add_worklog(
+        self, ticket_id: str, time_spent: str, comment: str = "", started: str = ""
+    ) -> bool:
+        """Add a worklog entry to a KOSIN ticket."""
+        payload = {"timeSpent": time_spent}
+        if comment:
+            payload["comment"] = comment
+        if started:
+            payload["started"] = started
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{self._api_base}/issue/{ticket_id}/worklog",
+                    headers=self._headers,
+                    json=payload,
+                )
+                resp.raise_for_status()
+                logger.info("kosin_worklog_added", ticket=ticket_id, time_spent=time_spent)
+                return True
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            logger.error("kosin_worklog_add_failed", error=f"HTTP {e.response.status_code}: {body}")
+            return False
+        except httpx.HTTPError as e:
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_worklog_add_failed", error=error_msg, error_type=type(e).__name__)
+            return False
+
+    async def get_worklogs(self, ticket_id: str) -> List[Dict]:
+        """Get all worklog entries for a KOSIN ticket."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{self._api_base}/issue/{ticket_id}/worklog",
+                    headers=self._headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return [
+                    {
+                        "id": w.get("id", ""),
+                        "author": w.get("author", {}).get("displayName", ""),
+                        "timeSpent": w.get("timeSpent", ""),
+                        "timeSpentSeconds": w.get("timeSpentSeconds", 0),
+                        "started": w.get("started", ""),
+                        "comment": w.get("comment", ""),
+                    }
+                    for w in data.get("worklogs", [])
+                ]
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            logger.error("kosin_worklogs_get_failed", error=f"HTTP {e.response.status_code}: {body}")
+            return []
+        except httpx.HTTPError as e:
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_worklogs_get_failed", error=error_msg, error_type=type(e).__name__)
+            return []
+
+    async def delete_worklog(self, ticket_id: str, worklog_id: str) -> bool:
+        """Delete a worklog entry from a KOSIN ticket."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.delete(
+                    f"{self._api_base}/issue/{ticket_id}/worklog/{worklog_id}",
+                    headers=self._headers,
+                )
+                resp.raise_for_status()
+                logger.info("kosin_worklog_deleted", ticket=ticket_id, worklog_id=worklog_id)
+                return True
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            logger.error("kosin_worklog_delete_failed", error=f"HTTP {e.response.status_code}: {body}")
+            return False
+        except httpx.HTTPError as e:
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_worklog_delete_failed", error=error_msg, error_type=type(e).__name__)
+            return False
+
 
 class MockKosinConnector(TicketConnector):
     """Mock KOSIN connector for testing without real KOSIN access."""
@@ -351,3 +466,46 @@ class MockKosinConnector(TicketConnector):
                 },
             })
         return issues
+
+    async def search_issues(self, jql: str, max_results: int = 50) -> List[Dict]:
+        """Mock search - returns all tickets as search results."""
+        results = []
+        for key, ticket in list(self.tickets.items())[:max_results]:
+            results.append({
+                "key": key,
+                "summary": ticket.get("summary", ""),
+                "status": ticket.get("status", "Open"),
+                "priority": ticket.get("priority", "Medium"),
+                "issuetype": "Support",
+                "created": "",
+                "assignee": "",
+            })
+        return results
+
+    async def add_worklog(
+        self, ticket_id: str, time_spent: str, comment: str = "", started: str = ""
+    ) -> bool:
+        if ticket_id not in self.tickets:
+            return False
+        logger.info("mock_kosin_worklog_added", ticket=ticket_id, time_spent=time_spent)
+        return True
+
+    async def get_worklogs(self, ticket_id: str) -> List[Dict]:
+        if ticket_id not in self.tickets:
+            return []
+        return [
+            {
+                "id": "10001",
+                "author": "mock_user",
+                "timeSpent": "2h",
+                "timeSpentSeconds": 7200,
+                "started": "2026-03-15T09:00:00.000+0000",
+                "comment": "Trabajo de ejemplo",
+            }
+        ]
+
+    async def delete_worklog(self, ticket_id: str, worklog_id: str) -> bool:
+        if ticket_id not in self.tickets:
+            return False
+        logger.info("mock_kosin_worklog_deleted", ticket=ticket_id, worklog_id=worklog_id)
+        return True

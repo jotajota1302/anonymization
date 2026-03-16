@@ -223,10 +223,14 @@ async def update_general_settings(body: GeneralSettings):
 
 _ALL_TOOLS_META = [
     {"name": "read_ticket", "description": "Consulta ticket completo del sistema origen"},
-    {"name": "update_kosin", "description": "Comenta/cambia estado en KOSIN"},
-    {"name": "create_kosin_ticket", "description": "Crea ticket nuevo en KOSIN"},
-    {"name": "execute_action", "description": "Ejecuta accion tecnica controlada"},
     {"name": "read_attachment", "description": "Lee adjunto de ticket (PDF, img, docs)"},
+    {"name": "update_ticket", "description": "Comenta/cambia estado en ticket"},
+    {"name": "create_ticket", "description": "Crea ticket nuevo en sistema destino"},
+    {"name": "search_tickets", "description": "Busca tickets con consulta JQL"},
+    {"name": "add_worklog", "description": "Imputa horas de trabajo en un ticket"},
+    {"name": "get_worklogs", "description": "Consulta horas imputadas en un ticket"},
+    {"name": "delete_worklog", "description": "Elimina imputacion de horas"},
+    {"name": "execute_action", "description": "Ejecuta accion tecnica controlada"},
 ]
 
 

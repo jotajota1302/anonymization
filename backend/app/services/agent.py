@@ -13,9 +13,11 @@ from ..services.anonymizer import Anonymizer
 from ..services.database import DatabaseService
 from ..websocket.manager import ConnectionManager
 from ..tools.read_ticket import read_ticket
-from ..tools.update_kosin import update_kosin, create_kosin_ticket
+from ..tools.update_kosin import update_ticket, create_ticket
 from ..tools.execute_action import execute_action
 from ..tools.read_attachment import read_attachment
+from ..tools.search_tickets import search_tickets
+from ..tools.worklog import add_worklog, get_worklogs, delete_worklog
 
 logger = structlog.get_logger()
 
@@ -89,10 +91,11 @@ para extraer su contenido anonimizado.
    - Si el operador pide acciones tecnicas, usa `execute_action`.
 
 **3. Registro de avance**
-   - Cuando haya progreso significativo, ofrece registrar un comentario en KOSIN con \
-`update_kosin`. Los comentarios siempre van anonimizados.
+   - Cuando haya progreso significativo, ofrece registrar un comentario con \
+`update_ticket`. Los comentarios siempre van anonimizados.
    - Si se necesita un ticket nuevo (ej: sub-tarea o incidencia relacionada), usa \
-`create_kosin_ticket`.
+`create_ticket`.
+   - Si el operador necesita imputar horas, usa `add_worklog`.
 
 **4. Resolucion o escalado**
    - Cuando la incidencia se resuelva, propone cerrarla y registrar la solucion en KOSIN.
@@ -100,7 +103,7 @@ para extraer su contenido anonimizado.
 y que informacion adicional necesitaria el equipo onshore.
 
 # HERRAMIENTAS DISPONIBLES
-Tienes 5 herramientas. Usalas cuando el operador lo solicite o sea claramente necesario.
+Tienes 9 herramientas. Usalas cuando el operador lo solicite o sea claramente necesario.
 
 ## read_ticket(ticket_id: str)
 Consulta el ticket completo del sistema origen. Devuelve: clave, estado, prioridad, \
@@ -109,16 +112,35 @@ resumen, descripcion y comentarios — todo ya anonimizado.
 - **Cuando usarla:** Para obtener detalles que no esten en el resumen inicial, o cuando \
 el operador pida "ver el ticket completo".
 
-## update_kosin(ticket_id: str, comment: str, status: str)
-Anade un comentario y/o cambia el estado de un ticket en KOSIN.
+## update_ticket(ticket_id: str, comment: str, status: str)
+Anade un comentario y/o cambia el estado de un ticket.
 - `comment`: Texto anonimizado a registrar. **Nunca incluir datos personales reales.**
 - `status`: `"in_progress"`, `"delivered"` o `"done"`. Dejar vacio si no cambia.
-- **Cuando usarla:** Para registrar progreso, hallazgos o resolucion en KOSIN.
+- **Cuando usarla:** Para registrar progreso, hallazgos o resolucion.
 
-## create_kosin_ticket(summary: str, description: str, priority: str)
-Crea un ticket nuevo en KOSIN con datos anonimizados.
+## create_ticket(summary: str, description: str, priority: str)
+Crea un ticket nuevo con datos anonimizados.
 - `priority`: `"Low"`, `"Medium"`, `"High"` o `"Critical"`
 - **Cuando usarla:** Si necesitas crear una sub-tarea o incidencia relacionada.
+
+## search_tickets(jql_query: str, max_results: int)
+Busca tickets usando una consulta JQL (Jira Query Language).
+- `jql_query`: Consulta JQL (ej: `status = Open ORDER BY priority DESC`)
+- `max_results`: Maximo de resultados (default 20)
+- **Cuando usarla:** Si el operador pide buscar tickets por estado, prioridad, tipo, etc.
+
+## add_worklog(ticket_id: str, time_spent: str, comment: str)
+Imputa horas de trabajo en un ticket.
+- `time_spent`: Formato Jira (ej: `"2h"`, `"1h 30m"`, `"3d"`)
+- **Cuando usarla:** Cuando el operador pida registrar tiempo trabajado.
+
+## get_worklogs(ticket_id: str)
+Consulta las horas imputadas en un ticket.
+- **Cuando usarla:** Si el operador quiere ver cuantas horas hay registradas.
+
+## delete_worklog(ticket_id: str, worklog_id: str)
+Elimina una imputacion de horas de un ticket.
+- **Cuando usarla:** Si el operador pide eliminar un registro de horas incorrecto.
 
 ## execute_action(action: str, service: str, interval: str)
 Ejecuta acciones tecnicas controladas (simuladas en POC, reales en produccion).
@@ -205,7 +227,11 @@ class AnonymizationAgent:
         logger.info("llm_initialized", provider=settings.llm_provider)
 
         # Tools — keep all_tools for toggling, tools for active set
-        self.all_tools = [read_ticket, update_kosin, create_kosin_ticket, execute_action, read_attachment]
+        self.all_tools = [
+            read_ticket, read_attachment, update_ticket, create_ticket,
+            search_tickets, add_worklog, get_worklogs, delete_worklog,
+            execute_action,
+        ]
         self.tools = list(self.all_tools)
 
     @staticmethod

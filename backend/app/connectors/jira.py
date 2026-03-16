@@ -236,6 +236,42 @@ class MockJiraConnector(TicketConnector):
         self.comments[key] = []
         return key, None
 
+    async def search_issues(self, jql: str, max_results: int = 50) -> List[Dict]:
+        results = []
+        for key, ticket in list(self.tickets.items())[:max_results]:
+            results.append({
+                "key": key,
+                "summary": ticket.get("summary", ""),
+                "status": ticket.get("status", "Open"),
+                "priority": ticket.get("priority", "Medium"),
+                "issuetype": "Support",
+                "created": ticket.get("created", ""),
+                "assignee": ticket.get("assignee", ""),
+            })
+        return results
+
+    async def add_worklog(
+        self, ticket_id: str, time_spent: str, comment: str = "", started: str = ""
+    ) -> bool:
+        return ticket_id in self.tickets
+
+    async def get_worklogs(self, ticket_id: str) -> List[Dict]:
+        if ticket_id not in self.tickets:
+            return []
+        return [
+            {
+                "id": "10001",
+                "author": "mock_user",
+                "timeSpent": "1h 30m",
+                "timeSpentSeconds": 5400,
+                "started": "2026-03-15T09:00:00.000+0000",
+                "comment": "Trabajo de ejemplo",
+            }
+        ]
+
+    async def delete_worklog(self, ticket_id: str, worklog_id: str) -> bool:
+        return ticket_id in self.tickets
+
 
 class JiraConnector(TicketConnector):
     """Real Jira connector using REST API v2."""

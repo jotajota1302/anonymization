@@ -1,22 +1,22 @@
-"""Tool: Create/update tickets in KOSIN (internal Jira)."""
+"""Tool: Create/update tickets in the ticket system (KOSIN/Jira)."""
 
 from langchain_core.tools import tool
 
 
 @tool
-async def update_kosin(
+async def update_ticket(
     ticket_id: str,
     comment: str = "",
     status: str = "",
 ) -> str:
-    """Actualiza un ticket en KOSIN (sistema interno) con informacion anonimizada.
+    """Actualiza un ticket en el sistema de tickets con informacion anonimizada.
     Puede anadir comentarios y/o cambiar el estado del ticket.
 
     IMPORTANTE: Solo pasar datos anonimizados (con tokens como [PERSONA_1]).
     Nunca incluir datos personales reales.
 
     Args:
-        ticket_id: ID del ticket en KOSIN (ej: KOS-001)
+        ticket_id: ID del ticket (ej: PESESG-123)
         comment: Comentario anonimizado para anadir al ticket
         status: Nuevo estado (in_progress, delivered, done) - dejar vacio si no se cambia
     """
@@ -42,16 +42,16 @@ async def update_kosin(
 
         return " | ".join(results) if results else "No se especifico ninguna accion"
     except Exception as e:
-        return f"Error al actualizar KOSIN: {str(e)}"
+        return f"Error al actualizar ticket: {str(e)}"
 
 
 @tool
-async def create_kosin_ticket(
+async def create_ticket(
     summary: str,
     description: str,
     priority: str = "Medium",
 ) -> str:
-    """Crea un nuevo ticket anonimizado en KOSIN.
+    """Crea un nuevo ticket anonimizado en el sistema de tickets.
 
     IMPORTANTE: Solo pasar datos anonimizados (con tokens como [PERSONA_1]).
 
@@ -67,7 +67,7 @@ async def create_kosin_ticket(
     try:
         key = await kosin.create_ticket(summary, description, priority)
         if key:
-            return f"Ticket creado en KOSIN: {key}"
-        return "Error al crear ticket en KOSIN"
+            return f"Ticket creado: {key}"
+        return "Error al crear ticket"
     except Exception as e:
-        return f"Error al crear ticket en KOSIN: {str(e)}"
+        return f"Error al crear ticket: {str(e)}"

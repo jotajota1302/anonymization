@@ -44,3 +44,23 @@ class TicketConnector(ABC):
     ) -> tuple[Optional[str], Optional[str]]:
         """Create a new ticket. Returns (ticket_key, error_message)."""
         ...
+
+    # --- Optional methods (default: NotImplementedError) ---
+
+    async def search_issues(self, jql: str, max_results: int = 50) -> List[Dict]:
+        """Search issues using JQL query. Returns list of issue dicts."""
+        raise NotImplementedError(f"{type(self).__name__} does not support search_issues")
+
+    async def add_worklog(
+        self, ticket_id: str, time_spent: str, comment: str = "", started: str = ""
+    ) -> bool:
+        """Add a worklog entry to a ticket. Returns True on success."""
+        raise NotImplementedError(f"{type(self).__name__} does not support add_worklog")
+
+    async def get_worklogs(self, ticket_id: str) -> List[Dict]:
+        """Get all worklog entries for a ticket."""
+        raise NotImplementedError(f"{type(self).__name__} does not support get_worklogs")
+
+    async def delete_worklog(self, ticket_id: str, worklog_id: str) -> bool:
+        """Delete a worklog entry. Returns True on success."""
+        raise NotImplementedError(f"{type(self).__name__} does not support delete_worklog")
