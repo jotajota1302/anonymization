@@ -130,11 +130,16 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
   if (boardTicket && !ticketId) {
     const pColors: Record<string, string> = { Critical: "#EF4444", High: "#F59E0B", Medium: "#3B82F6", Low: "#10B981" };
     const pLabels: Record<string, string> = { Critical: "Critica", High: "Alta", Medium: "Media", Low: "Baja" };
+    const srcLabels: Record<string, string> = { kosin: "KOSIN", stdvert1: "STDVERT1", remedy: "Remedy", servicenow: "ServiceNow", jira: "Jira" };
+    const srcColors: Record<string, string> = { stdvert1: "#6366F1", kosin: "#3B82F6", remedy: "#F59E0B", servicenow: "#10B981", jira: "#3B82F6" };
+    const srcLabel = srcLabels[boardTicket.source_system] || boardTicket.source_system.toUpperCase();
+    const srcColor = srcColors[boardTicket.source_system] || "#6B7280";
 
     return (
       <div className="flex flex-col h-full min-h-0">
         <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-6 py-4 shrink-0">
           <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded text-xs font-bold text-white" style={{ backgroundColor: srcColor }}>{srcLabel}</span>
             <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{boardTicket.key}</span>
             <span className="text-slate-300 dark:text-slate-600">/</span>
             <span className="text-xs text-slate-500 dark:text-slate-400">{boardTicket.issue_type}</span>
@@ -160,7 +165,10 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
                 </div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-3">Incidencia pendiente de atender</h2>
                 <div className="bg-white dark:bg-slate-800 rounded-xl p-5 mb-5 text-left border border-slate-200 dark:border-slate-700 shadow-sm">
-                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3">{boardTicket.key}</div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{boardTicket.key}</span>
+                    <span className="px-2 py-0.5 rounded text-xs font-bold text-white" style={{ backgroundColor: srcColor }}>{srcLabel}</span>
+                  </div>
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div><span className="text-slate-400 dark:text-slate-500">Tipo</span><p className="font-medium text-slate-800 dark:text-slate-200">{boardTicket.issue_type}</p></div>
                     <div><span className="text-slate-400 dark:text-slate-500">Prioridad</span>
@@ -170,13 +178,16 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
                       </p>
                     </div>
                     <div><span className="text-slate-400 dark:text-slate-500">Estado</span><p className="font-medium text-slate-800 dark:text-slate-200">{boardTicket.status}</p></div>
+                    <div><span className="text-slate-400 dark:text-slate-500">Origen</span><p className="font-medium text-slate-800 dark:text-slate-200">{srcLabel}</p></div>
                   </div>
                 </div>
-                <button onClick={() => onConfirmIngest(boardTicket.key)}
-                  className="px-8 py-3 bg-primary text-white rounded-xl text-sm font-bold hover:bg-blue-600 active:scale-[0.98] transition-all shadow-lg shadow-primary/20 inline-flex items-center gap-2">
-                  <IconShield size={18} className="text-white" />
-                  Atender esta incidencia
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  <button onClick={() => onConfirmIngest(boardTicket.key)}
+                    className="px-8 py-3 bg-primary text-white rounded-xl text-sm font-bold hover:bg-blue-600 active:scale-[0.98] transition-all shadow-lg shadow-primary/20 inline-flex items-center gap-2">
+                    <IconShield size={18} className="text-white" />
+                    Atender esta incidencia
+                  </button>
+                </div>
               </div>
             )}
           </div>

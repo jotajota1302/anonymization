@@ -12,7 +12,7 @@ const priorityConfig: Record<string, { color: string; shadow: string; label: str
 };
 
 const sourceSystemLabels: Record<string, string> = {
-  kosin: "KOSIN", remedy: "Remedy", servicenow: "ServiceNow", jira: "Jira",
+  kosin: "KOSIN", stdvert1: "STDVERT1", remedy: "Remedy", servicenow: "ServiceNow", jira: "Jira",
 };
 
 interface Props {
