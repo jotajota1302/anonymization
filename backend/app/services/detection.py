@@ -24,7 +24,13 @@ class RegexDetector(DetectionService):
         "TELEFONO": re.compile(
             r'(?<!\d)(?:\+34|0034)?\s?[6-9]\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3}(?!\d)'
         ),
-        "DNI": re.compile(r'\b[0-9XYZxyz]\d{7}[A-Za-z]\b'),
+        "DNI": re.compile(
+            r'(?i)'
+            r'(?:(?:DNI|NIF|NIE|NI|CIF)[:\s.\-]*)?'  # Optional prefix: DNI, NIF, NIE, NI, CIF
+            r'\b([XYZxyz][\s.\-]?\d{1,2}[\s.\-]?\d{3}[\s.\-]?\d{3}[\s.\-]?[A-Za-z]'  # NIE: X-1234567-A
+            r'|\d{1,2}[\s.\-]?\d{3}[\s.\-]?\d{3}[\s.\-]?[A-Za-z]'  # DNI: 23.452.321Y or 23452321Y
+            r'|[A-Ha-h]\d{7}[0-9A-Ja-j])\b'  # CIF: B12345678
+        ),
         "IP": re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'),
         "IPV6": re.compile(
             r'(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}'
@@ -145,6 +151,7 @@ class PresidioDetector(DetectionService):
         "IBAN_CODE": "IBAN",
         "IP_ADDRESS": "IP",
         "NRP": "DNI",  # National Registration/ID
+        "ES_DNI": "DNI",  # Custom Spanish DNI/NIF/NIE/CIF recognizer
         "CREDIT_CARD": "TARJETA_CREDITO",
         "DATE_TIME": "FECHA",
         "URL": "URL",
@@ -203,7 +210,7 @@ class PresidioDetector(DetectionService):
     )
 
     def __init__(self, model_name: str = "es_core_news_lg"):
-        from presidio_analyzer import AnalyzerEngine
+        from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
         from presidio_analyzer.nlp_engine import SpacyNlpEngine
 
         nlp_engine = SpacyNlpEngine(
@@ -214,6 +221,30 @@ class PresidioDetector(DetectionService):
             supported_languages=["es"],
         )
         self._model_name = model_name
+
+        # Custom recognizer for Spanish DNI/NIF/NIE/CIF
+        spanish_id_recognizer = PatternRecognizer(
+            supported_entity="ES_DNI",
+            supported_language="es",
+            patterns=[
+                Pattern(
+                    "DNI_NIF",
+                    r"(?i)(?:(?:DNI|NIF|NIE|NI|CIF)[:\s.\-]*)?\b\d{1,2}[\s.\-]?\d{3}[\s.\-]?\d{3}[\s.\-]?[A-Za-z]\b",
+                    0.85,
+                ),
+                Pattern(
+                    "NIE",
+                    r"(?i)(?:(?:NIE|NI)[:\s.\-]*)?\b[XYZxyz][\s.\-]?\d{1,2}[\s.\-]?\d{3}[\s.\-]?\d{3}[\s.\-]?[A-Za-z]\b",
+                    0.85,
+                ),
+                Pattern(
+                    "CIF",
+                    r"(?i)(?:CIF[:\s.\-]*)?\b[A-Ha-h]\d{7}[0-9A-Ja-j]\b",
+                    0.80,
+                ),
+            ],
+        )
+        self._analyzer.registry.add_recognizer(spanish_id_recognizer)
 
     def _is_false_positive(self, entity_text: str, entity_type: str) -> bool:
         """Filter out obvious false positives from Presidio NER."""
