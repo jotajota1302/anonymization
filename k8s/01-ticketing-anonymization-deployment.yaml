@@ -158,6 +158,26 @@ spec:
             secretKeyRef:
               name: "ticketing-anonymization-secret"
               key: "KOSIN_PROJECT_KEY"
+        - name: "USE_MOCK_JIRA"
+          valueFrom:
+            secretKeyRef:
+              name: "ticketing-anonymization-secret"
+              key: "USE_MOCK_JIRA"
+        - name: "ACTIVE_SOURCES"
+          valueFrom:
+            secretKeyRef:
+              name: "ticketing-anonymization-secret"
+              key: "ACTIVE_SOURCES"
+        - name: "SOURCE_PROJECT"
+          valueFrom:
+            secretKeyRef:
+              name: "ticketing-anonymization-secret"
+              key: "SOURCE_PROJECT"
+        - name: "KOSIN_PROJECT"
+          valueFrom:
+            secretKeyRef:
+              name: "ticketing-anonymization-secret"
+              key: "KOSIN_PROJECT_KEY"
         volumeMounts:
         - name: "ticketing-anonymization-data-volume"
           mountPath: "/app/data"
