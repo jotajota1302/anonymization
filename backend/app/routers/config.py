@@ -245,7 +245,7 @@ async def _get_agent_config(db) -> dict:
             return raw
     defaults = {
         "provider": s.llm_provider,
-        "model": s.ollama_model if s.llm_provider == "ollama" else (s.openai_model if s.llm_provider == "openai" else (s.axet_model if s.llm_provider == "axet" else s.azure_openai_deployment)),
+        "model": s.ollama_model if s.llm_provider == "ollama" else (s.openai_model if s.llm_provider == "openai" else s.axet_model),
         "temperature": 0.3,
         "tools": {t["name"]: True for t in _ALL_TOOLS_META},
     }
@@ -280,7 +280,7 @@ async def get_agent_config():
         "model": config.get("model", s.ollama_model),
         "temperature": config.get("temperature", 0.3),
         "system_prompt": state.get("system_prompt", ""),
-        "available_providers": ["ollama", "openai", "azure", "axet"],
+        "available_providers": ["ollama", "openai", "axet"],
         "tools": tools_list,
         "ollama_config": {
             "base_url": s.ollama_base_url,
@@ -291,17 +291,11 @@ async def get_agent_config():
             "model": s.openai_model,
             "available_models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
         },
-        "azure_config": {
-            "endpoint_masked": _mask_token(s.azure_openai_endpoint),
-            "deployment": s.azure_openai_deployment,
-            "api_version": s.azure_openai_api_version,
-        },
         "axet_config": {
             "token_masked": _mask_token(s.axet_bearer_token),
-            "asset_id": s.axet_asset_id,
-            "project_id": s.axet_project_id,
-            "model": s.axet_model,
-            "available_models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+            "asset_id": config.get("axet_asset_id", s.axet_asset_id),
+            "project_id": config.get("axet_project_id", s.axet_project_id),
+            "model": config.get("model", s.axet_model) if config.get("provider") == "axet" else s.axet_model,
         },
     }
 
@@ -326,6 +320,7 @@ class AgentConfigUpdate(BaseModel):
     temperature: Optional[float] = None
     system_prompt: Optional[str] = None
     axet_project_id: Optional[str] = None
+    axet_asset_id: Optional[str] = None
 
 
 @router.put("/agent")
@@ -347,6 +342,10 @@ async def update_agent_config(body: AgentConfigUpdate):
         config["axet_project_id"] = body.axet_project_id
         from ..config import settings as s
         s.axet_project_id = body.axet_project_id
+    if body.axet_asset_id is not None:
+        config["axet_asset_id"] = body.axet_asset_id
+        from ..config import settings as s
+        s.axet_asset_id = body.axet_asset_id
 
     await db.upsert_system_config("agent", extra_config=json.dumps(config))
 
@@ -407,10 +406,6 @@ class TestConnectionRequest(BaseModel):
     model: Optional[str] = None
     api_key: Optional[str] = None
     ollama_base_url: Optional[str] = None
-    azure_endpoint: Optional[str] = None
-    azure_deployment: Optional[str] = None
-    azure_api_key: Optional[str] = None
-    azure_api_version: Optional[str] = None
     axet_bearer_token: Optional[str] = None
     axet_asset_id: Optional[str] = None
     axet_project_id: Optional[str] = None
@@ -429,12 +424,6 @@ async def test_agent_connection(body: TestConnectionRequest):
         if body.provider == "openai":
             kwargs["openai_api_key"] = body.api_key or s.openai_api_key
             model = model or s.openai_model
-        elif body.provider == "azure":
-            kwargs["azure_endpoint"] = body.azure_endpoint or s.azure_openai_endpoint
-            kwargs["azure_api_key"] = body.azure_api_key or s.azure_openai_key
-            kwargs["azure_deployment"] = body.azure_deployment or s.azure_openai_deployment
-            kwargs["azure_api_version"] = body.azure_api_version or s.azure_openai_api_version
-            model = model or s.azure_openai_deployment
         elif body.provider == "axet":
             kwargs["axet_bearer_token"] = body.axet_bearer_token or s.axet_bearer_token
             kwargs["axet_asset_id"] = body.axet_asset_id or s.axet_asset_id
@@ -474,8 +463,6 @@ async def update_agent_api_key(body: UpdateApiKeyRequest):
 
     if body.provider == "openai":
         s.openai_api_key = body.api_key
-    elif body.provider == "azure":
-        s.azure_openai_key = body.api_key
     elif body.provider == "axet":
         s.axet_bearer_token = body.api_key
     else:

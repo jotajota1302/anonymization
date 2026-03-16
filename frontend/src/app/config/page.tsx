@@ -252,6 +252,9 @@ export default function ConfigPage() {
         setAgentPrompt(data.system_prompt);
         setAgentPromptSaved(data.system_prompt);
         setAgentTools(data.tools);
+        // Restore Axet-specific fields from persisted config
+        if (data.axet_config?.project_id) setAxetProjectId(data.axet_config.project_id);
+        if (data.axet_config?.asset_id) setAxetAssetId(data.axet_config.asset_id);
       }
     } catch (err) {
       console.error("Failed to fetch agent config:", err);
@@ -476,6 +479,7 @@ export default function ConfigPage() {
           model: agentModel,
           temperature: agentTemp,
           ...(agentProvider === "axet" && axetProjectId ? { axet_project_id: axetProjectId } : {}),
+          ...(agentProvider === "axet" && axetAssetId ? { axet_asset_id: axetAssetId } : {}),
         }),
       });
       if (res.ok) {
@@ -638,11 +642,10 @@ export default function ConfigPage() {
                   <p className={`${descCls} mb-4`}>Configura el LLM que usa el agente de anonimizacion.</p>
 
                   {/* Provider radio cards */}
-                  <div className="grid grid-cols-4 gap-3 mb-4">
+                  <div className="grid grid-cols-3 gap-3 mb-4">
                     {[
                       { id: "ollama", title: "Ollama", desc: "Desarrollo local", bgColor: "bg-green-600" },
                       { id: "openai", title: "OpenAI", desc: "API directa GPT", bgColor: "bg-slate-800 dark:bg-slate-600" },
-                      { id: "azure", title: "Azure OpenAI", desc: "Produccion GDPR", bgColor: "bg-blue-600" },
                       { id: "axet", title: "Axet NTT", desc: "Proxy corporativo", bgColor: "bg-purple-600" },
                     ].map((p) => (
                       <button key={p.id} onClick={() => {
@@ -653,8 +656,6 @@ export default function ConfigPage() {
                           setAgentModel(models[0] || "minimax-m2:cloud");
                         } else if (p.id === "openai") {
                           setAgentModel(agentConfig?.openai_config?.model || "gpt-4o-mini");
-                        } else if (p.id === "azure") {
-                          setAgentModel(agentConfig?.azure_config?.deployment || "gpt-4");
                         } else if (p.id === "axet") {
                           setAgentModel(agentConfig?.axet_config?.model || "gpt-4o-mini");
                         }
@@ -974,23 +975,10 @@ export default function ConfigPage() {
                         <p className="text-xs text-slate-400 dark:text-slate-500">Proxy corporativo NTT Data — axet.nttdata.com</p>
                       </>
                     ) : (
-                      <>
-                        <div>
-                          <label className={labelCls}>Deployment</label>
-                          <input type="text" value={agentModel} onChange={(e) => setAgentModel(e.target.value)} className={inputCls} />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className={labelCls}>Endpoint</label>
-                            <input type="text" value={agentConfig?.azure_config?.endpoint_masked || ""} disabled className={`${inputCls} opacity-60`} />
-                          </div>
-                          <div>
-                            <label className={labelCls}>API Version</label>
-                            <input type="text" value={agentConfig?.azure_config?.api_version || ""} disabled className={`${inputCls} opacity-60`} />
-                          </div>
-                        </div>
-                        <p className="text-xs text-slate-400 dark:text-slate-500">Endpoint y API key configurados via variables de entorno</p>
-                      </>
+                      <div>
+                        <label className={labelCls}>Modelo</label>
+                        <input type="text" value={agentModel} onChange={(e) => setAgentModel(e.target.value)} className={inputCls} />
+                      </div>
                     )}
 
                     {/* Temperature slider */}

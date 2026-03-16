@@ -221,16 +221,6 @@ class AnonymizationAgent:
                 model=model or settings.ollama_model,
                 temperature=temperature,
             )
-        elif provider == "azure":
-            from langchain_openai import AzureChatOpenAI
-            return AzureChatOpenAI(
-                azure_endpoint=kwargs.get("azure_endpoint", settings.azure_openai_endpoint),
-                azure_deployment=kwargs.get("azure_deployment", model or settings.azure_openai_deployment),
-                api_key=kwargs.get("azure_api_key", settings.azure_openai_key),
-                api_version=kwargs.get("azure_api_version", settings.azure_openai_api_version),
-                temperature=temperature,
-                streaming=True,
-            )
         elif provider == "openai":
             from langchain_openai import ChatOpenAI
             return ChatOpenAI(
