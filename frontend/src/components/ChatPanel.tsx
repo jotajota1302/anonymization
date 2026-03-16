@@ -81,7 +81,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
   const [isSyncing, setIsSyncing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { chatMessages, streamingContent, isStreaming, isIngesting, tickets, suggestedChips } = useAppStore();
+  const { chatMessages, streamingContent, isStreaming, isIngesting, tickets, suggestedChips, piiWarnings } = useAppStore();
   const messages = ticketId ? chatMessages[ticketId] || [] : [];
   const ticket = tickets.find((t) => t.id === ticketId);
 
@@ -240,6 +240,16 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
               {pLabels[ticket.priority] || ticket.priority}
             </span>
           </div>
+        </div>
+      )}
+
+      {/* PII warning banner */}
+      {ticketId && piiWarnings[ticketId] && (
+        <div className="px-6 py-2.5 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/50 flex items-center gap-2.5 shrink-0">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500 shrink-0">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span className="text-xs font-medium text-amber-700 dark:text-amber-300">{piiWarnings[ticketId]}</span>
         </div>
       )}
 

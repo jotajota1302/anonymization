@@ -28,13 +28,14 @@ export default function Home() {
     isLoadingTickets,
     setIsLoadingBoard,
     setIsLoadingTickets,
+    setPiiWarning,
   } = useAppStore();
 
   // Toast notification state
-  const [toast, setToast] = useState<{ message: string; type: "error" | "success" } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "error" | "success" | "warning" } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  const showToast = useCallback((message: string, type: "error" | "success" = "error") => {
+  const showToast = useCallback((message: string, type: "error" | "success" | "warning" = "error") => {
     setToast({ message, type });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 6000);
@@ -150,7 +151,7 @@ export default function Home() {
         if (res.ok) {
           const data = await res.json();
           if (data.pii_warning) {
-            showToast(data.pii_warning, "success");
+            setPiiWarning(data.ticket_id, data.pii_warning);
           }
           await Promise.all([fetchBoardTickets(), fetchTickets()]);
           handleSelectTicket(data.ticket_id);
@@ -307,15 +308,17 @@ export default function Home() {
 
       {/* Toast notification */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-4 fade-in duration-300">
-          <div className={`flex items-center gap-3 px-5 py-3 rounded-lg shadow-lg border text-sm font-medium ${
+        <div className="fixed top-20 right-6 z-[100] animate-in slide-in-from-top-4 fade-in duration-300">
+          <div className={`flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-xl border text-sm font-medium max-w-md ${
             toast.type === "error"
               ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300"
+              : toast.type === "warning"
+              ? "bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300"
               : "bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300"
           }`}>
-            <span>{toast.type === "error" ? "\u26A0" : "\u2713"}</span>
+            <span className="text-base shrink-0">{toast.type === "error" ? "\u26A0" : toast.type === "warning" ? "\u26A0" : "\u2713"}</span>
             <span>{toast.message}</span>
-            <button onClick={() => setToast(null)} className="ml-2 text-current opacity-50 hover:opacity-100">&times;</button>
+            <button onClick={() => setToast(null)} className="ml-2 text-current opacity-50 hover:opacity-100 shrink-0">&times;</button>
           </div>
         </div>
       )}

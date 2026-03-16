@@ -1,6 +1,7 @@
 "use client";
 
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ChatMessage as ChatMessageType } from "@/types";
 
 interface Props {
@@ -73,6 +74,7 @@ function AgentContent({ content }: { content: string }) {
       prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5
       prose-a:text-primary prose-a:no-underline hover:prose-a:underline">
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           p: ({ children }) => {
             if (typeof children === "string") {
@@ -121,7 +123,7 @@ export function ChatMessage({ message }: Props) {
   const isAgent = message.role === "agent";
 
   return (
-    <div className={`flex gap-4 mb-6 ${isAgent ? "max-w-[85%]" : "justify-end"}`}>
+    <div className={`flex gap-4 mb-6 ${isAgent ? "max-w-[95%]" : "justify-end"}`}>
       {isAgent && (
         <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
           <AgentIcon />
@@ -130,7 +132,7 @@ export function ChatMessage({ message }: Props) {
 
       <div className={
         isAgent
-          ? "bg-white dark:bg-slate-800 border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4"
+          ? "bg-white dark:bg-slate-800 border-l-4 border-primary shadow-sm rounded-r-xl rounded-bl-xl p-4 min-w-0"
           : "bg-primary text-white shadow-md rounded-l-xl rounded-br-xl p-4 max-w-[85%]"
       }>
         {isAgent ? (

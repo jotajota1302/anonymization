@@ -13,6 +13,7 @@ interface AppState {
   isIngesting: boolean;
   isLoadingBoard: boolean;
   isLoadingTickets: boolean;
+  piiWarnings: Record<number, string>;
   suggestedChips: string[];
 
   setTickets: (tickets: TicketSummary[]) => void;
@@ -28,6 +29,7 @@ interface AppState {
   setIsIngesting: (val: boolean) => void;
   setIsLoadingBoard: (val: boolean) => void;
   setIsLoadingTickets: (val: boolean) => void;
+  setPiiWarning: (ticketId: number, warning: string) => void;
   setSuggestedChips: (chips: string[]) => void;
   updateTicketStatus: (ticketId: number, status: TicketSummary["status"]) => void;
 }
@@ -44,6 +46,7 @@ export const useAppStore = create<AppState>((set) => ({
   isIngesting: false,
   isLoadingBoard: true,
   isLoadingTickets: true,
+  piiWarnings: {},
   suggestedChips: [],
 
   setTickets: (tickets) => set({ tickets }),
@@ -88,6 +91,11 @@ export const useAppStore = create<AppState>((set) => ({
   setIsLoadingBoard: (val) => set({ isLoadingBoard: val }),
 
   setIsLoadingTickets: (val) => set({ isLoadingTickets: val }),
+
+  setPiiWarning: (ticketId, warning) =>
+    set((state) => ({
+      piiWarnings: { ...state.piiWarnings, [ticketId]: warning },
+    })),
 
   updateTicketStatus: (ticketId, status) =>
     set((state) => ({
