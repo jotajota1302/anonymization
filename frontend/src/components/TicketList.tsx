@@ -22,11 +22,13 @@ interface Props {
   selectedBoardKey: string | null;
   onSelectTicket: (id: number) => void;
   onSelectBoardTicket: (key: string) => void;
+  isLoadingBoard?: boolean;
+  isLoadingTickets?: boolean;
 }
 
 type ListTab = "pendientes" | "en_atencion";
 
-export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBoardKey, onSelectTicket, onSelectBoardTicket }: Props) {
+export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBoardKey, onSelectTicket, onSelectBoardTicket, isLoadingBoard, isLoadingTickets }: Props) {
   const [activeTab, setActiveTab] = useState<ListTab>("pendientes");
 
   const pendingBoard = boardTickets.filter((bt) => !bt.already_ingested);
@@ -84,7 +86,17 @@ export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBo
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar min-h-0">
-        {activeTab === "pendientes" && (
+        {activeTab === "pendientes" && isLoadingBoard && (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <svg className="animate-spin h-8 w-8 text-primary/60" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <p className="text-xs text-slate-400 dark:text-slate-500">Cargando incidencias...</p>
+          </div>
+        )}
+
+        {activeTab === "pendientes" && !isLoadingBoard && (
           <div className="space-y-3" role="list" aria-label="Incidencias pendientes">
             {pendingBoard.map((bt) => {
               const priority = priorityConfig[bt.priority] || priorityConfig.Medium;
@@ -130,7 +142,17 @@ export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBo
           </div>
         )}
 
-        {activeTab === "en_atencion" && (
+        {activeTab === "en_atencion" && isLoadingTickets && (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <svg className="animate-spin h-8 w-8 text-primary/60" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <p className="text-xs text-slate-400 dark:text-slate-500">Cargando tickets...</p>
+          </div>
+        )}
+
+        {activeTab === "en_atencion" && !isLoadingTickets && (
           <div className="space-y-3" role="list" aria-label="Incidencias en atencion">
             {activeTickets.map((ticket) => (
               <TicketCard key={ticket.id} ticket={ticket} isSelected={ticket.id === selectedTicketId} onClick={() => onSelectTicket(ticket.id)} />

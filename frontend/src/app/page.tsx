@@ -24,6 +24,10 @@ export default function Home() {
     isConnected,
     isIngesting,
     setIsIngesting,
+    isLoadingBoard,
+    isLoadingTickets,
+    setIsLoadingBoard,
+    setIsLoadingTickets,
   } = useAppStore();
 
   // Toast notification state
@@ -58,8 +62,10 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Failed to fetch board tickets:", err);
+    } finally {
+      setIsLoadingBoard(false);
     }
-  }, [setBoardTickets]);
+  }, [setBoardTickets, setIsLoadingBoard]);
 
   const fetchTickets = useCallback(async () => {
     try {
@@ -70,8 +76,10 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Failed to fetch tickets:", err);
+    } finally {
+      setIsLoadingTickets(false);
     }
-  }, [setTickets]);
+  }, [setTickets, setIsLoadingTickets]);
 
   const [pollingMs, setPollingMs] = useState(60000);
 
@@ -250,14 +258,23 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mr-2">Sistemas Integrados:</span>
-              <div className="flex gap-1.5">
-                {[...new Set(boardTickets.map((bt) => bt.source_system))].map((src) => (
-                  <span key={src} className="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded border border-slate-300 dark:border-slate-700">
-                    {src.toUpperCase()}
-                  </span>
-                ))}
-                {boardTickets.length === 0 && (
-                  <span className="text-xs text-slate-400 dark:text-slate-500 italic">ninguno</span>
+              <div className="flex gap-1.5 items-center">
+                {isLoadingBoard ? (
+                  <svg className="animate-spin h-4 w-4 text-slate-400" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : (
+                  <>
+                    {[...new Set(boardTickets.map((bt) => bt.source_system))].map((src) => (
+                      <span key={src} className="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded border border-slate-300 dark:border-slate-700">
+                        {src.toUpperCase()}
+                      </span>
+                    ))}
+                    {boardTickets.length === 0 && (
+                      <span className="text-xs text-slate-400 dark:text-slate-500 italic">ninguno</span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -272,6 +289,7 @@ export default function Home() {
             boardTickets={boardTickets} tickets={tickets}
             selectedTicketId={selectedTicketId} selectedBoardKey={selectedBoardKey}
             onSelectTicket={handleSelectTicket} onSelectBoardTicket={handleSelectBoardTicket}
+            isLoadingBoard={isLoadingBoard} isLoadingTickets={isLoadingTickets}
           />
         </aside>
         <section id="main-content" className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-900">

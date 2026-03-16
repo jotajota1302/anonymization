@@ -11,6 +11,8 @@ interface AppState {
   isStreaming: boolean;
   isConnected: boolean;
   isIngesting: boolean;
+  isLoadingBoard: boolean;
+  isLoadingTickets: boolean;
   suggestedChips: string[];
 
   setTickets: (tickets: TicketSummary[]) => void;
@@ -24,6 +26,8 @@ interface AppState {
   setIsStreaming: (val: boolean) => void;
   setIsConnected: (val: boolean) => void;
   setIsIngesting: (val: boolean) => void;
+  setIsLoadingBoard: (val: boolean) => void;
+  setIsLoadingTickets: (val: boolean) => void;
   setSuggestedChips: (chips: string[]) => void;
   updateTicketStatus: (ticketId: number, status: TicketSummary["status"]) => void;
 }
@@ -38,6 +42,8 @@ export const useAppStore = create<AppState>((set) => ({
   isStreaming: false,
   isConnected: false,
   isIngesting: false,
+  isLoadingBoard: true,
+  isLoadingTickets: true,
   suggestedChips: [],
 
   setTickets: (tickets) => set({ tickets }),
@@ -78,6 +84,10 @@ export const useAppStore = create<AppState>((set) => ({
   setIsConnected: (val) => set({ isConnected: val }),
 
   setIsIngesting: (val) => set({ isIngesting: val }),
+
+  setIsLoadingBoard: (val) => set({ isLoadingBoard: val }),
+
+  setIsLoadingTickets: (val) => set({ isLoadingTickets: val }),
 
   updateTicketStatus: (ticketId, status) =>
     set((state) => ({
