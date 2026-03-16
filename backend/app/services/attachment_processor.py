@@ -1,9 +1,11 @@
-"""Attachment text extraction service supporting PDF, images (OCR), and Office formats.
+"""Attachment text extraction service supporting PDF, images (LLM vision), and Office formats.
 
 Supports optional Presidio Image Redactor for PII detection/redaction directly on images.
+Uses LLM vision (OpenAI GPT-4o) for image text extraction instead of Tesseract OCR.
 """
 
 import io
+import base64
 from typing import Tuple, Optional
 
 import structlog
@@ -149,19 +151,65 @@ class AttachmentProcessor:
             return []
 
     def _extract_image(self, content: bytes) -> str:
+        """Extract text from image using LLM vision API."""
         try:
-            from PIL import Image
-            import pytesseract
-        except ImportError:
-            return "[Error: pytesseract o Pillow no instalados. Instalar con: pip install pytesseract Pillow]"
+            from ..config import settings
+            b64_image = base64.b64encode(content).decode("utf-8")
 
-        try:
-            image = Image.open(io.BytesIO(content))
-            text = pytesseract.image_to_string(image, lang="spa+eng")
-            return text.strip()
+            # Detect MIME type
+            mime = "image/png"
+            if content[:3] == b'\xff\xd8\xff':
+                mime = "image/jpeg"
+            elif content[:4] == b'\x89PNG':
+                mime = "image/png"
+            elif content[:2] == b'BM':
+                mime = "image/bmp"
+
+            if settings.llm_provider == "openai":
+                import httpx
+                response = httpx.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                    json={
+                        "model": settings.openai_model if "vision" in settings.openai_model or "4o" in settings.openai_model else "gpt-4o-mini",
+                        "messages": [{"role": "user", "content": [
+                            {"type": "text", "text": "Extrae todo el texto visible en esta imagen. Devuelve solo el texto extraido, sin comentarios ni explicaciones."},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}}
+                        ]}],
+                        "max_tokens": 4096,
+                    },
+                    timeout=60,
+                )
+                response.raise_for_status()
+                text = response.json()["choices"][0]["message"]["content"]
+                logger.info("image_text_extracted_via_llm", length=len(text))
+                return text.strip()
+
+            elif settings.llm_provider == "azure":
+                import httpx
+                response = httpx.post(
+                    f"{settings.azure_openai_endpoint}/openai/deployments/{settings.azure_openai_deployment}/chat/completions?api-version={settings.azure_openai_api_version}",
+                    headers={"api-key": settings.azure_openai_key},
+                    json={
+                        "messages": [{"role": "user", "content": [
+                            {"type": "text", "text": "Extrae todo el texto visible en esta imagen. Devuelve solo el texto extraido, sin comentarios ni explicaciones."},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}}
+                        ]}],
+                        "max_tokens": 4096,
+                    },
+                    timeout=60,
+                )
+                response.raise_for_status()
+                text = response.json()["choices"][0]["message"]["content"]
+                logger.info("image_text_extracted_via_azure", length=len(text))
+                return text.strip()
+
+            else:
+                return "[Extraccion de texto de imagenes requiere LLM_PROVIDER openai o azure con soporte vision]"
+
         except Exception as e:
-            logger.error("ocr_extraction_failed", error=str(e))
-            return f"[Error OCR: {e}]"
+            logger.error("llm_image_extraction_failed", error=str(e))
+            return f"[Error extraccion imagen: {e}]"
 
     def _extract_pdf(self, content: bytes) -> str:
         try:
@@ -177,9 +225,11 @@ class AttachmentProcessor:
                     if text and text.strip():
                         pages_text.append(text.strip())
                     else:
-                        # OCR fallback for scanned pages
+                        # LLM vision fallback for scanned pages
                         img = page.to_image(resolution=300)
-                        ocr_text = self._extract_image(img.original.tobytes())
+                        buf = io.BytesIO()
+                        img.original.save(buf, format="PNG")
+                        ocr_text = self._extract_image(buf.getvalue())
                         if ocr_text and not ocr_text.startswith("[Error"):
                             pages_text.append(ocr_text)
 
