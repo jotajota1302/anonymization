@@ -10,8 +10,7 @@ from .config import settings
 from .services.database import DatabaseService
 from .services.anonymizer import Anonymizer
 from .websocket.manager import ConnectionManager
-from .connectors.jira import MockJiraConnector
-from .connectors.kosin import MockKosinConnector, KosinConnector
+from .connectors.kosin import KosinConnector
 from .connectors.router import ConnectorRouter
 from .middleware.rate_limiter import RateLimiterMiddleware
 
@@ -60,6 +59,100 @@ def _init_detector():
         return RegexDetector()
 
 
+def _create_connector_from_config(config: dict) -> "TicketConnector":
+    """Create a real connector instance from a system_config DB row."""
+    connector_type = config.get("connector_type", "jira")
+    base_url = config.get("base_url", "")
+    token = config.get("auth_token", "")
+    project = config.get("project_key", "")
+    extra = config.get("extra_config", "{}")
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except (json.JSONDecodeError, TypeError):
+            extra = {}
+
+    if connector_type == "jira":
+        return KosinConnector(
+            base_url=base_url,
+            token=token,
+            project=project,
+            issue_type_id=extra.get("issue_type_id", settings.kosin_issue_type_id),
+        )
+    elif connector_type == "remedy":
+        from .connectors.remedy import RemedyConnector
+        return RemedyConnector(base_url=base_url, token=token, project=project)
+    elif connector_type == "servicenow":
+        from .connectors.servicenow import ServiceNowConnector
+        return ServiceNowConnector(base_url=base_url, token=token, project=project)
+    else:
+        return KosinConnector(
+            base_url=base_url,
+            token=token,
+            project=project,
+        )
+
+
+async def reload_connectors(db=None):
+    """Reload all connectors from DB configuration. Called at startup and on config change."""
+    if db is None:
+        db = app_state.get("db")
+    if not db:
+        return
+
+    router = ConnectorRouter()
+    configs = await db.get_all_system_configs()
+
+    # Build connectors from active integrations
+    kosin_connector = None
+    for cfg in configs:
+        name = cfg.get("system_name", "")
+        # Skip internal config entries
+        if name in ("anonymization", "agent", "general"):
+            continue
+        if not cfg.get("is_active"):
+            continue
+
+        try:
+            connector = _create_connector_from_config(cfg)
+            project_key = cfg.get("project_key", "")
+            system_type = cfg.get("system_type", "source")
+
+            if system_type == "destination":
+                kosin_connector = connector
+                if project_key:
+                    router.register(name, connector, [f"{project_key}-"])
+            else:
+                # Source connector
+                if project_key:
+                    router.register(name, connector, [f"{project_key}-"])
+
+            logger.info("connector_loaded", system=name, type=cfg.get("connector_type"),
+                        project=project_key, system_type=system_type)
+        except Exception as e:
+            logger.error("connector_load_failed", system=name, error=str(e))
+
+    # Fallback: if no destination connector was found, create from env
+    if kosin_connector is None:
+        kosin_connector = KosinConnector(
+            base_url=settings.kosin_url,
+            token=settings.kosin_token,
+            project=settings.kosin_project,
+            issue_type_id=settings.kosin_issue_type_id,
+        )
+        logger.info("kosin_connector_from_env", project=settings.kosin_project)
+
+    app_state["connector_router"] = router
+    app_state["kosin_connector"] = kosin_connector
+    # Backward compat: jira_connector points to the first registered source
+    first_source = router.systems[0] if router.systems else None
+    app_state["jira_connector"] = (
+        router.get_connector_by_name(first_source) if first_source else kosin_connector
+    )
+
+    logger.info("connectors_reloaded", systems=router.systems)
+
+
 async def _seed_default_configs(db):
     """Seed system_config with defaults from .env if not already present."""
     defaults = [
@@ -78,7 +171,7 @@ async def _seed_default_configs(db):
                 "parent_key": settings.kosin_parent_key,
             }),
             "is_active": 1,
-            "is_mock": int(settings.use_mock_jira),
+            "is_mock": 0,
             "polling_interval_sec": 60,
         },
         {
@@ -92,7 +185,7 @@ async def _seed_default_configs(db):
             "project_key": settings.source_project,
             "extra_config": "{}",
             "is_active": int("stdvert1" in settings.active_sources),
-            "is_mock": int(settings.use_mock_jira),
+            "is_mock": 0,
             "polling_interval_sec": 60,
         },
         {
@@ -106,7 +199,7 @@ async def _seed_default_configs(db):
             "project_key": "",
             "extra_config": "{}",
             "is_active": int("remedy" in settings.active_sources),
-            "is_mock": 1,
+            "is_mock": 0,
             "polling_interval_sec": 60,
         },
         {
@@ -120,16 +213,23 @@ async def _seed_default_configs(db):
             "project_key": "",
             "extra_config": "{}",
             "is_active": int("servicenow" in settings.active_sources),
-            "is_mock": 1,
+            "is_mock": 0,
             "polling_interval_sec": 60,
         },
     ]
+    active_list = [s.strip().lower() for s in settings.active_sources.split(",") if s.strip()]
     for cfg in defaults:
-        existing = await db.get_system_config(cfg["system_name"])
+        name = cfg.pop("system_name")
+        existing = await db.get_system_config(name)
         if not existing:
-            name = cfg.pop("system_name")
             await db.upsert_system_config(name, **cfg)
             logger.info("seeded_system_config", system=name)
+        else:
+            # Always sync is_active with ACTIVE_SOURCES env var
+            should_be_active = 1 if (name in active_list or cfg.get("system_type") == "destination") else 0
+            if existing.get("is_active") != should_be_active:
+                await db.upsert_system_config(name, is_active=should_be_active)
+                logger.info("synced_is_active", system=name, is_active=should_be_active)
 
 
 @asynccontextmanager
@@ -159,63 +259,8 @@ async def lifespan(app: FastAPI):
     ws_manager = ConnectionManager()
     app_state["ws_manager"] = ws_manager
 
-    # Connectors + Router
-    router = ConnectorRouter()
-    active_sources = [s.strip().lower() for s in settings.active_sources.split(",") if s.strip()]
-
-    if settings.use_mock_jira:
-        # Mock mode: register mock connectors for each active source
-        if "kosin" in active_sources:
-            kosin_source = MockJiraConnector()
-            router.register("kosin", kosin_source, ["PESESG-", "PROJ-"])
-
-        if "remedy" in active_sources:
-            from .connectors.remedy import MockRemedyConnector
-            router.register("remedy", MockRemedyConnector(), ["INC", "CHG", "PRB"])
-
-        if "servicenow" in active_sources:
-            from .connectors.servicenow import MockServiceNowConnector
-            router.register("servicenow", MockServiceNowConnector(), ["SNOW-"])
-
-        kosin_connector = MockKosinConnector()
-        logger.info("connectors_mode", mode="mock", sources=active_sources)
-    else:
-        # Real mode: separate source (STDVERT1) and destination (GDNESPAIN) connectors
-        kosin_connector = KosinConnector(
-            base_url=settings.kosin_url,
-            token=settings.kosin_token,
-            project=settings.kosin_project,
-            issue_type_id=settings.kosin_issue_type_id,
-        )
-
-        if "stdvert1" in active_sources:
-            source_connector = KosinConnector(
-                base_url=settings.kosin_url,
-                token=settings.kosin_token,
-                project=settings.source_project,
-            )
-            router.register("stdvert1", source_connector, [f"{settings.source_project}-"])
-
-        if "kosin" in active_sources:
-            router.register("kosin", kosin_connector, [f"{settings.kosin_project}-"])
-
-        if "remedy" in active_sources:
-            from .connectors.remedy import MockRemedyConnector
-            router.register("remedy", MockRemedyConnector(), ["INC", "CHG", "PRB"])
-
-        if "servicenow" in active_sources:
-            from .connectors.servicenow import MockServiceNowConnector
-            router.register("servicenow", MockServiceNowConnector(), ["SNOW-"])
-
-        logger.info("connectors_mode", mode="real", url=settings.kosin_url,
-                     source_project=settings.source_project,
-                     dest_project=settings.kosin_project, sources=active_sources)
-
-    app_state["connector_router"] = router
-    app_state["kosin_connector"] = kosin_connector
-    # Backward compat: jira_connector points to the first registered source
-    first_source = active_sources[0] if active_sources else "kosin"
-    app_state["jira_connector"] = router.get_connector_by_name(first_source) or kosin_connector
+    # Load connectors from DB config
+    await reload_connectors(db)
 
     # System prompt (stored in app_state for hot-reload)
     from .services.agent import DEFAULT_SYSTEM_PROMPT
@@ -281,11 +326,12 @@ app.include_router(axet_auth.router)
 
 @app.get("/health")
 async def health_check():
+    router = app_state.get("connector_router")
     return {
         "status": "healthy",
         "app": settings.app_name,
         "agent_ready": app_state.get("agent") is not None,
-        "mock_mode": settings.use_mock_jira,
+        "active_systems": router.systems if router else [],
     }
 
 
@@ -297,8 +343,9 @@ async def api_status():
         tickets = await db.get_all_tickets()
         ticket_count = len(tickets)
 
+    router = app_state.get("connector_router")
     return {
         "tickets_total": ticket_count,
         "ws_connections": len(app_state.get("ws_manager", ConnectionManager())._connections),
-        "mock_mode": settings.use_mock_jira,
+        "active_systems": router.systems if router else [],
     }

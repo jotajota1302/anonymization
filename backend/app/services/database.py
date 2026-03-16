@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS system_config (
     project_key TEXT NOT NULL DEFAULT '',
     extra_config TEXT NOT NULL DEFAULT '{}',
     is_active INTEGER NOT NULL DEFAULT 1,
-    is_mock INTEGER NOT NULL DEFAULT 1,
+    is_mock INTEGER NOT NULL DEFAULT 0,
     polling_interval_sec INTEGER NOT NULL DEFAULT 60,
     last_connection_test TIMESTAMP,
     last_connection_status TEXT,

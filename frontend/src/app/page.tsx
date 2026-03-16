@@ -31,6 +31,21 @@ export default function Home() {
     setPiiWarning,
   } = useAppStore();
 
+  // Active source projects (loaded from integrations config)
+  const [sourceProjects, setSourceProjects] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/config/integrations`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((integrations: Array<{ system_name: string; display_name: string; project_key: string; system_type: string; is_active: boolean }>) => {
+        const sources = integrations
+          .filter((i) => i.system_type === "source" && i.is_active)
+          .map((i) => i.project_key || i.display_name);
+        setSourceProjects(sources);
+      })
+      .catch(() => {});
+  }, []);
+
   // Toast notification state
   const [toast, setToast] = useState<{ message: string; type: "error" | "success" | "warning" } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -253,9 +268,10 @@ export default function Home() {
         subheader={
           <>
             <div className="flex items-center gap-3 text-sm font-medium">
-              <span className="text-slate-400 dark:text-slate-400">KOSIN</span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400"><polyline points="9 18 15 12 9 6"/></svg>
-              <span className="text-slate-700 dark:text-slate-100">Proyecto PESESG</span>
+              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Origen:</span>
+              {sourceProjects.length > 0 ? sourceProjects.map((name) => (
+                <span key={name} className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-bold rounded border border-blue-200 dark:border-blue-800">{name}</span>
+              )) : <span className="text-xs text-slate-400 italic">ninguno</span>}
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mr-2">Sistemas Integrados:</span>

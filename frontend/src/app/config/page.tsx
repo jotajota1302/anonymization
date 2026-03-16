@@ -335,7 +335,6 @@ export default function ConfigPage() {
         auth_email: sys.auth_email,
         project_key: sys.project_key,
         is_active: sys.is_active,
-        is_mock: sys.is_mock,
         polling_interval_sec: sys.polling_interval_sec,
         board_id: sys.extra_config?.board_id || "",
         issue_type_id: sys.extra_config?.issue_type_id || "",
@@ -355,7 +354,6 @@ export default function ConfigPage() {
       if (editForm.auth_email !== undefined) body.auth_email = editForm.auth_email;
       if (editForm.project_key !== undefined) body.project_key = editForm.project_key;
       body.is_active = editForm.is_active;
-      body.is_mock = editForm.is_mock;
       body.polling_interval_sec = Number(editForm.polling_interval_sec);
       body.extra_config = {
         board_id: String(editForm.board_id || ""),
@@ -1253,7 +1251,6 @@ export default function ConfigPage() {
                           <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{sys.display_name}</p>
                           <span className={`px-1.5 py-0.5 text-xs font-bold rounded ${badge.color}`}>{badge.label}</span>
                           <span className={`w-2 h-2 rounded-full ${statusDot(sys.last_connection_status)}`} />
-                          {sys.is_mock && <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">MOCK</span>}
                           {!sys.is_active && <span className="px-1.5 py-0.5 text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded">INACTIVO</span>}
                         </div>
                         <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -1363,13 +1360,6 @@ export default function ConfigPage() {
                               <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_active ? "left-[22px]" : "left-0.5"}`} />
                             </button>
                             <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Activo</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <button onClick={() => setEditForm((f) => ({ ...f, is_mock: !f.is_mock }))}
-                              className={`relative w-10 h-5 rounded-full transition-colors ${editForm.is_mock ? "bg-amber-400" : "bg-slate-300 dark:bg-slate-600"}`}>
-                              <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${editForm.is_mock ? "left-[22px]" : "left-0.5"}`} />
-                            </button>
-                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Mock</span>
                           </label>
                         </div>
                       </div>

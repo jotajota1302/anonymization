@@ -77,11 +77,8 @@ class Settings(BaseSettings):
     # PII Detector: "composite", "regex", or "presidio"
     pii_detector: str = Field(default="composite", description="PII detector: 'composite', 'regex', or 'presidio'")
 
-    # Active source systems (comma-separated): "kosin", "kosin,remedy,servicenow"
-    active_sources: str = Field(default="kosin", description="Comma-separated active source systems")
-
-    # Mock mode (for pilot without real Jira)
-    use_mock_jira: bool = Field(default=True, description="Use mock Jira connector for testing")
+    # Active source systems (comma-separated): "stdvert1", "stdvert1,remedy,servicenow"
+    active_sources: str = Field(default="stdvert1", description="Comma-separated active source systems")
 
     model_config = {
         "env_file": ".env",

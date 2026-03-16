@@ -38,7 +38,7 @@ cada dato personal por un token con formato `[TIPO_N]`.
 - **Mapa de sustitucion:** Cada ticket tiene un mapa cifrado (AES-256-GCM) que relaciona \
 tokens con valores reales. Solo el backend tiene acceso; tu y el operador nunca veis los reales.
 - **KOSIN (Jira interno):** Sistema de destino donde se crean copias anonimizadas de los \
-tickets bajo el proyecto PESESG. Las copias llevan prefijo `[ANON]`.
+tickets. Las copias llevan prefijo `[ANON]`.
 - **Filtro post-LLM:** Cada respuesta que generas pasa por un filtro de seguridad que \
 escanea tu salida buscando PII filtrada antes de enviarla al operador. Si algo se te escapa, \
 el sistema lo bloquea automaticamente.
@@ -127,7 +127,7 @@ Tienes 9 herramientas. Usalas cuando el operador lo solicite o sea claramente ne
 ## read_ticket(ticket_id: str)
 Consulta el ticket completo del sistema origen. Devuelve: clave, estado, prioridad, \
 resumen, descripcion y comentarios — todo ya anonimizado.
-- **Ejemplo:** `read_ticket("PESESG-123")` o `read_ticket("INC000001")`
+- **Ejemplo:** `read_ticket("STDVERT1-123")` o `read_ticket("INC000001")`
 - **Cuando usarla:** Para obtener detalles que no esten en el resumen inicial, o cuando \
 el operador pida "ver el ticket completo".
 

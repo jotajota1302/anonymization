@@ -71,7 +71,7 @@ class ConnectorRouter:
                 if hasattr(connector, 'get_board_issues'):
                     issues = await connector.get_board_issues()
                 elif hasattr(connector, 'get_all_tickets'):
-                    # For connectors without board (e.g., mock Jira), convert
+                    # Fallback for connectors without get_board_issues
                     tickets = await connector.get_all_tickets()
                     issues = [
                         {

@@ -23,7 +23,7 @@ function TokenBadge({ token }: { token: string }) {
 }
 
 function renderInlineTokens(text: string): (string | JSX.Element)[] {
-  const pattern = /(\[LINK:(.*?):(.*?)\])|(PESESG-\d+)|(\[[A-Z_]+\d*\])/g;
+  const pattern = /(\[LINK:(.*?):(.*?)\])|([A-Z][A-Z0-9]+-\d+)|(\[[A-Z_]+\d*\])/g;
   const parts: (string | JSX.Element)[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;

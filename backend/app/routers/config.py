@@ -107,6 +107,14 @@ async def update_integration(name: str, body: IntegrationUpdate):
     if fields:
         await db.upsert_system_config(name, **fields)
 
+    # Hot-reload connectors so changes take effect immediately
+    try:
+        from ..main import reload_connectors
+        await reload_connectors(db)
+        logger.info("connectors_hot_reloaded", trigger=name)
+    except Exception as e:
+        logger.error("connectors_hot_reload_failed", error=str(e))
+
     updated = await db.get_system_config(name)
     return _serialize_config(updated)
 
@@ -120,10 +128,6 @@ async def test_integration(name: str):
     config = await db.get_system_config(name)
     if not config:
         raise HTTPException(status_code=404, detail=f"Integration '{name}' not found")
-
-    if config.get("is_mock"):
-        await db.update_connection_status(name, "connected")
-        return {"status": "connected", "message": "Modo mock: conexion simulada OK", "user": "mock_user"}
 
     base_url = config.get("base_url", "").rstrip("/")
     token = config.get("auth_token", "")
