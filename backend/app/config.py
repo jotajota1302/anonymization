@@ -50,7 +50,8 @@ class Settings(BaseSettings):
         description="KOSIN/Jira base URL (used as both source and destination in POC)"
     )
     kosin_token: str = Field(default="", description="KOSIN Bearer token")
-    kosin_project: str = Field(default="PESESG", description="KOSIN project key")
+    kosin_project: str = Field(default="GDNESPAIN", description="KOSIN destination project key")
+    source_project: str = Field(default="STDVERT1", description="Source Jira project key")
     kosin_issue_type_id: str = Field(default="15408", description="KOSIN sub-requirement issue type ID")
     kosin_board_id: str = Field(default="18418", description="KOSIN agile board ID")
     kosin_parent_key: str = Field(default="", description="Parent ticket key for anonymized sub-tasks")

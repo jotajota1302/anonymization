@@ -65,8 +65,8 @@ async def _seed_default_configs(db):
     defaults = [
         {
             "system_name": "kosin",
-            "display_name": "KOSIN",
-            "system_type": "both",
+            "display_name": "GDNESPAIN (Destino)",
+            "system_type": "destination",
             "connector_type": "jira",
             "base_url": settings.kosin_url,
             "auth_token": settings.kosin_token,
@@ -78,6 +78,20 @@ async def _seed_default_configs(db):
                 "parent_key": settings.kosin_parent_key,
             }),
             "is_active": 1,
+            "is_mock": int(settings.use_mock_jira),
+            "polling_interval_sec": 60,
+        },
+        {
+            "system_name": "stdvert1",
+            "display_name": "STDVERT1 (Origen)",
+            "system_type": "source",
+            "connector_type": "jira",
+            "base_url": settings.kosin_url,
+            "auth_token": settings.kosin_token,
+            "auth_email": "",
+            "project_key": settings.source_project,
+            "extra_config": "{}",
+            "is_active": int("stdvert1" in settings.active_sources),
             "is_mock": int(settings.use_mock_jira),
             "polling_interval_sec": 60,
         },
@@ -166,15 +180,24 @@ async def lifespan(app: FastAPI):
         kosin_connector = MockKosinConnector()
         logger.info("connectors_mode", mode="mock", sources=active_sources)
     else:
-        # Real mode: KOSIN as source + destination
+        # Real mode: separate source (STDVERT1) and destination (GDNESPAIN) connectors
         kosin_connector = KosinConnector(
             base_url=settings.kosin_url,
             token=settings.kosin_token,
             project=settings.kosin_project,
             issue_type_id=settings.kosin_issue_type_id,
         )
+
+        if "stdvert1" in active_sources:
+            source_connector = KosinConnector(
+                base_url=settings.kosin_url,
+                token=settings.kosin_token,
+                project=settings.source_project,
+            )
+            router.register("stdvert1", source_connector, [f"{settings.source_project}-"])
+
         if "kosin" in active_sources:
-            router.register("kosin", kosin_connector, ["PESESG-", "PROJ-"])
+            router.register("kosin", kosin_connector, [f"{settings.kosin_project}-"])
 
         if "remedy" in active_sources:
             from .connectors.remedy import MockRemedyConnector
@@ -184,8 +207,9 @@ async def lifespan(app: FastAPI):
             from .connectors.servicenow import MockServiceNowConnector
             router.register("servicenow", MockServiceNowConnector(), ["SNOW-"])
 
-        logger.info("connectors_mode", mode="real_kosin", url=settings.kosin_url,
-                     project=settings.kosin_project, sources=active_sources)
+        logger.info("connectors_mode", mode="real", url=settings.kosin_url,
+                     source_project=settings.source_project,
+                     dest_project=settings.kosin_project, sources=active_sources)
 
     app_state["connector_router"] = router
     app_state["kosin_connector"] = kosin_connector

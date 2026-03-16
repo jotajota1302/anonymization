@@ -251,7 +251,7 @@ class KosinConnector(TicketConnector):
         jql = (
             f'project={self.project} '
             f'AND status in (Open, "In Progress", "To Do") '
-            f'ORDER BY priority DESC, created DESC'
+            f'ORDER BY created DESC'
         )
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -260,7 +260,7 @@ class KosinConnector(TicketConnector):
                     headers=self._headers,
                     params={
                         "jql": jql,
-                        "maxResults": 50,
+                        "maxResults": 20,
                         "fields": "summary,status,priority,issuetype",
                     },
                 )
