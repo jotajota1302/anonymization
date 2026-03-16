@@ -2,6 +2,7 @@
 
 import aiosqlite
 import os
+from contextlib import asynccontextmanager
 from typing import Optional, List, Any
 from datetime import datetime
 
@@ -87,20 +88,30 @@ class DatabaseService:
     async def init(self):
         """Initialize database schema."""
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
             await db.executescript(DB_SCHEMA)
             await db.commit()
         logger.info("database_initialized", path=self.db_path)
 
+    @asynccontextmanager
+    async def _connect(self):
+        """Create a connection with WAL mode and busy timeout for Azure Files compatibility."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
+            yield db
+
     async def execute(self, query: str, params: tuple = ()) -> Optional[int]:
         """Execute a write query. Returns lastrowid for inserts."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._connect() as db:
             cursor = await db.execute(query, params)
             await db.commit()
             return cursor.lastrowid
 
     async def fetchone(self, query: str, params: tuple = ()) -> Optional[dict]:
         """Fetch a single row as dict."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._connect() as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(query, params)
             row = await cursor.fetchone()
@@ -108,7 +119,7 @@ class DatabaseService:
 
     async def fetchall(self, query: str, params: tuple = ()) -> List[dict]:
         """Fetch all rows as list of dicts."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._connect() as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(query, params)
             rows = await cursor.fetchall()
