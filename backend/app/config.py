@@ -15,8 +15,13 @@ class Settings(BaseSettings):
     # Database
     db_path: str = Field(default="data/ticketing.db", description="SQLite database path")
 
-    # LLM Provider: "ollama", "azure", "openai", or "axet"
+    # LLM Provider for Resolution Agent: "ollama", "azure", "openai", or "axet"
     llm_provider: str = Field(default="ollama", description="LLM provider: 'ollama', 'azure', 'openai', or 'axet'")
+
+    # Anonymization LLM (smaller/faster model for PII filtering)
+    anon_llm_provider: str = Field(default="", description="Anonymization LLM provider (empty = disabled, uses regex/Presidio only)")
+    anon_llm_model: str = Field(default="", description="Anonymization LLM model name (e.g. gpt-4o-mini, llama3.2:3b)")
+    anon_llm_temperature: float = Field(default=0.0, description="Anonymization LLM temperature (should be 0 for deterministic output)")
 
     # Ollama
     ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama server URL")

@@ -29,6 +29,7 @@ export default function Home() {
     setIsLoadingBoard,
     setIsLoadingTickets,
     setPiiWarning,
+    boardFilters,
   } = useAppStore();
 
   // Active source projects (loaded from integrations config)
@@ -70,8 +71,17 @@ export default function Home() {
   const { sendMessage, requestSummary } = useWebSocket(clientId);
 
   const fetchBoardTickets = useCallback(async () => {
+    setIsLoadingBoard(true);
     try {
-      const res = await fetch(`${API_URL}/api/tickets/board`);
+      const params = new URLSearchParams();
+      if (boardFilters.max_results !== 50) params.set("max_results", String(boardFilters.max_results));
+      if (boardFilters.date_from) params.set("date_from", boardFilters.date_from);
+      if (boardFilters.date_to) params.set("date_to", boardFilters.date_to);
+      if (boardFilters.priority?.length) params.set("priority", boardFilters.priority.join(","));
+      if (boardFilters.status?.length) params.set("status", boardFilters.status.join(","));
+      if (boardFilters.issue_type?.length) params.set("issue_type", boardFilters.issue_type.join(","));
+      const qs = params.toString();
+      const res = await fetch(`${API_URL}/api/tickets/board${qs ? `?${qs}` : ""}`);
       if (res.ok) {
         const data: BoardTicket[] = await res.json();
         setBoardTickets(data);
@@ -81,7 +91,7 @@ export default function Home() {
     } finally {
       setIsLoadingBoard(false);
     }
-  }, [setBoardTickets, setIsLoadingBoard]);
+  }, [setBoardTickets, setIsLoadingBoard, boardFilters]);
 
   const fetchTickets = useCallback(async () => {
     try {
@@ -251,7 +261,7 @@ export default function Home() {
     if (!selectedTicketId) return;
     setConfirmModal({
       title: "Cerrar ticket definitivamente",
-      message: "El mapa de sustitucion sera destruido permanentemente. Esta accion no se puede deshacer.",
+      message: "El ticket se cerrara definitivamente y no se podra reabrir. Esta accion no se puede deshacer.",
       onConfirm: () => { doCloseTicket(); setConfirmModal(null); },
     });
   }, [selectedTicketId, doCloseTicket]);
@@ -306,6 +316,7 @@ export default function Home() {
             boardTickets={boardTickets} tickets={tickets}
             selectedTicketId={selectedTicketId} selectedBoardKey={selectedBoardKey}
             onSelectTicket={handleSelectTicket} onSelectBoardTicket={handleSelectBoardTicket}
+            onApplyFilters={fetchBoardTickets}
             isLoadingBoard={isLoadingBoard} isLoadingTickets={isLoadingTickets}
           />
         </aside>

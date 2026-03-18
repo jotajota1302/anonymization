@@ -3,7 +3,7 @@
 from typing import Dict, List, Tuple, Optional
 import structlog
 
-from .base import TicketConnector
+from .base import TicketConnector, BoardFilters
 
 logger = structlog.get_logger()
 
@@ -60,7 +60,7 @@ class ConnectorRouter:
         """List all registered system names."""
         return list(self._connectors.keys())
 
-    async def get_all_board_issues(self) -> List[Dict]:
+    async def get_all_board_issues(self, filters: BoardFilters = None) -> List[Dict]:
         """Aggregate board issues from ALL registered systems.
 
         Each issue gets an additional 'source_system' field.
@@ -69,7 +69,7 @@ class ConnectorRouter:
         for system_name, connector in self._connectors.items():
             try:
                 if hasattr(connector, 'get_board_issues'):
-                    issues = await connector.get_board_issues()
+                    issues = await connector.get_board_issues(filters=filters)
                 elif hasattr(connector, 'get_all_tickets'):
                     # Fallback for connectors without get_board_issues
                     tickets = await connector.get_all_tickets()

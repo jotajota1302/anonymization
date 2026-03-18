@@ -251,10 +251,6 @@ async def lifespan(app: FastAPI):
     anonymizer = Anonymizer(detector=detector)
     app_state["anonymizer"] = anonymizer
 
-    # Encryption key
-    encryption_key = Anonymizer.key_from_string(settings.encryption_key)
-    app_state["encryption_key"] = encryption_key
-
     # WebSocket manager
     ws_manager = ConnectionManager()
     app_state["ws_manager"] = ws_manager
@@ -266,17 +262,33 @@ async def lifespan(app: FastAPI):
     from .services.agent import DEFAULT_SYSTEM_PROMPT
     app_state["system_prompt"] = DEFAULT_SYSTEM_PROMPT
 
-    # Agent (lazy init - requires LLM config)
+    # Anonymization LLM (optional, small/fast model for PII filtering)
+    anon_llm = None
+    if settings.anon_llm_provider:
+        try:
+            from .services.agent import AnonymizationLLM
+            anon_llm = AnonymizationLLM(
+                provider=settings.anon_llm_provider,
+                model=settings.anon_llm_model,
+                temperature=settings.anon_llm_temperature,
+            )
+            app_state["anon_llm"] = anon_llm
+            logger.info("anon_llm_initialized", provider=settings.anon_llm_provider, model=settings.anon_llm_model)
+        except Exception as e:
+            logger.warning("anon_llm_init_failed", error=str(e), hint="PII filtering will use regex/Presidio only")
+            anon_llm = None
+
+    # Resolution Agent (main LLM for chat + tools)
     try:
         from .services.agent import AnonymizationAgent
         agent = AnonymizationAgent(
             anonymizer=anonymizer,
             db=db,
             ws_manager=ws_manager,
-            encryption_key=encryption_key,
+            anon_llm=anon_llm,
         )
         app_state["agent"] = agent
-        logger.info("agent_initialized", provider=settings.llm_provider)
+        logger.info("resolution_agent_initialized", provider=settings.llm_provider)
     except Exception as e:
         logger.warning("agent_init_failed", error=str(e),
                        hint="Set LLM provider env vars for agent functionality")

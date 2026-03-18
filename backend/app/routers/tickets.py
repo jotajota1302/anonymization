@@ -1,7 +1,7 @@
 """Ticket management API endpoints."""
 
-from typing import List
-from fastapi import APIRouter, HTTPException
+from typing import List, Optional
+from fastapi import APIRouter, HTTPException, Query
 import structlog
 
 from ..models.schemas import (
@@ -42,23 +42,41 @@ async def list_tickets():
 
 
 @router.get("/board", response_model=List[BoardTicket])
-async def list_board_tickets():
+async def list_board_tickets(
+    max_results: int = Query(50, ge=1, le=200),
+    date_from: Optional[str] = Query(None, description="Created since (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Created until (YYYY-MM-DD)"),
+    priority: Optional[str] = Query(None, description="Comma-separated priorities"),
+    status: Optional[str] = Query(None, description="Comma-separated statuses"),
+    issue_type: Optional[str] = Query(None, description="Comma-separated issue types"),
+):
     """List live tickets from all active source systems (safe metadata only, no PII).
 
     Uses ConnectorRouter to aggregate from all registered systems.
     Filters out [ANON] tickets and the VOLCADO parent.
     Crosses with DB to flag already-ingested tickets.
     """
+    from ..connectors.base import BoardFilters
+
+    filters = BoardFilters(
+        max_results=max_results,
+        date_from=date_from,
+        date_to=date_to,
+        priority=[p.strip() for p in priority.split(",")] if priority else None,
+        status=[s.strip() for s in status.split(",")] if status else None,
+        issue_type=[t.strip() for t in issue_type.split(",")] if issue_type else None,
+    )
+
     state = _get_state()
     db = state["db"]
     connector_router = state.get("connector_router")
 
     # Get board issues from all sources via router, or fallback to KOSIN only
     if connector_router:
-        issues = await connector_router.get_all_board_issues()
+        issues = await connector_router.get_all_board_issues(filters=filters)
     else:
         kosin = state["kosin_connector"]
-        issues = await kosin.get_board_issues()
+        issues = await kosin.get_board_issues(filters=filters)
         for issue in issues:
             issue["source_system"] = "kosin"
 
@@ -115,7 +133,6 @@ async def ingest_confirm(kosin_key: str):
     db = state["db"]
     anonymizer = state["anonymizer"]
     kosin = state["kosin_connector"]
-    encryption_key = state["encryption_key"]
 
     # Resolve source connector via router
     connector_router = state.get("connector_router")
@@ -168,14 +185,9 @@ async def ingest_confirm(kosin_key: str):
     except Exception:
         comments = []
 
-    # 3. Anonymize everything together
-    comments_text = ""
-    if comments:
-        comments_text = "\n\n--- COMENTARIOS ---\n" + "\n---\n".join(
-            f"{c.get('author', 'Unknown')}: {c.get('body', '')}" for c in comments
-        )
-
-    full_text = f"{summary}\n{description}{comments_text}"
+    # 3. Anonymize everything together (using shared assembly method)
+    full_text = anonymizer.assemble_ingest_text(summary, description, comments)
+    source_text_hash = anonymizer.compute_text_hash(full_text)
     anonymized_text, sub_map = anonymizer.anonymize(full_text)
 
     # Split back
@@ -214,7 +226,7 @@ async def ingest_confirm(kosin_key: str):
     if not kosin_id:
         raise HTTPException(status_code=500, detail=f"Error creando ticket anonimizado en KOSIN: {create_error}")
 
-    # 5. Save to local DB (with rollback if it fails)
+    # 5. Save to local DB (with rollback if it fails) — NO substitution map stored
     try:
         ticket_id = await db.create_ticket_mapping(
             source_system=source_system_name,
@@ -223,11 +235,8 @@ async def ingest_confirm(kosin_key: str):
             summary=anon_summary,
             anonymized_description=anon_description,
             priority=priority.lower() if isinstance(priority, str) else "medium",
+            source_text_hash=source_text_hash,
         )
-
-        if sub_map:
-            encrypted = anonymizer.encrypt_map(sub_map, encryption_key)
-            await db.save_substitution_map(ticket_id, encrypted)
     except Exception as e:
         # Rollback: delete the KOSIN ticket we just created
         logger.error("db_save_failed_rolling_back", kosin_id=kosin_id, error=str(e))
@@ -318,10 +327,12 @@ async def update_ticket_status(ticket_id: int, update: TicketStatusUpdate):
 
     await db.update_ticket_status(ticket_id, update.status.value)
 
-    # If closing, optionally delete substitution map
+    # If closing, invalidate any cached map in the agent
     if update.status.value == "closed":
-        await db.delete_substitution_map(ticket_id)
-        logger.info("substitution_map_destroyed", ticket_id=ticket_id)
+        agent = state.get("agent")
+        if agent:
+            agent.invalidate_map_cache(ticket_id)
+        logger.info("ticket_closed_cache_invalidated", ticket_id=ticket_id)
 
     await db.add_audit_log(
         operator_id="operator",
@@ -338,7 +349,7 @@ async def sync_to_client(ticket_id: int, body: SyncToClientRequest):
     """De-anonymize a comment and publish it to the source ticket."""
     state = _get_state()
     db = state["db"]
-    encryption_key = state["encryption_key"]
+    anonymizer = state["anonymizer"]
 
     ticket = await db.get_ticket(ticket_id)
     if not ticket:
@@ -347,18 +358,8 @@ async def sync_to_client(ticket_id: int, body: SyncToClientRequest):
     if ticket["status"] == "closed":
         raise HTTPException(
             status_code=409,
-            detail="El ticket está cerrado y el mapa de sustitución fue destruido",
+            detail="El ticket esta cerrado",
         )
-
-    # Load and decrypt substitution map
-    encrypted = await db.get_substitution_map(ticket_id)
-    if not encrypted:
-        raise HTTPException(status_code=404, detail="No substitution map found")
-
-    sub_map = Anonymizer.decrypt_map(encrypted, encryption_key)
-
-    # De-anonymize the comment
-    real_comment = Anonymizer.de_anonymize(body.comment, sub_map)
 
     # Resolve source connector via router
     source_ticket_id = ticket["source_ticket_id"]
@@ -370,6 +371,25 @@ async def sync_to_client(ticket_id: int, body: SyncToClientRequest):
             source_connector = state["jira_connector"]
     else:
         source_connector = state["jira_connector"]
+
+    # Reconstruct substitution map on-the-fly from source
+    try:
+        source_ticket = await source_connector.get_ticket(source_ticket_id)
+        comments = await source_connector.get_comments(source_ticket_id)
+        full_text = Anonymizer.assemble_ingest_text(
+            source_ticket.get("summary", ""),
+            source_ticket.get("description", "") or "",
+            comments,
+        )
+        sub_map = anonymizer.reconstruct_map(full_text)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"No se pudo reconstruir el mapa desde el origen: {str(e)}",
+        )
+
+    # De-anonymize the comment
+    real_comment = Anonymizer.de_anonymize(body.comment, sub_map)
 
     # Publish to source ticket
     success = await source_connector.add_comment(source_ticket_id, real_comment)

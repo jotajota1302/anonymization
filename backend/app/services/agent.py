@@ -35,8 +35,9 @@ con datos personales reales (nombres, emails, DNIs, telefonos, IPs, IBANs, direc
 - **Motor de deteccion PII:** Un pipeline de anonimizacion (configurable: RegexDetector, \
 Microsoft Presidio NLP con spaCy, o ambos combinados) escanea todo el texto y reemplaza \
 cada dato personal por un token con formato `[TIPO_N]`.
-- **Mapa de sustitucion:** Cada ticket tiene un mapa cifrado (AES-256-GCM) que relaciona \
-tokens con valores reales. Solo el backend tiene acceso; tu y el operador nunca veis los reales.
+- **Mapa de sustitucion:** Para cada ticket se reconstruye un mapa temporal en memoria que relaciona \
+tokens con valores reales leyendo el ticket original del sistema origen. Nunca se persiste en base \
+de datos. Solo el backend tiene acceso; tu y el operador nunca veis los reales.
 - **KOSIN (Jira interno):** Sistema de destino donde se crean copias anonimizadas de los \
 tickets. Las copias llevan prefijo `[ANON]`.
 - **Filtro post-LLM:** Cada respuesta que generas pasa por un filtro de seguridad que \
@@ -260,6 +261,80 @@ Ejemplos segun contexto:
 - Con adjuntos: `[CHIPS: "Leer adjunto", "Buscar tickets relacionados", "Consultar logs"]`"""
 
 
+ANON_LLM_SYSTEM_PROMPT = """Eres un validador de PII (Personally Identifiable Information). Tu unica funcion es analizar texto y detectar datos personales que los detectores automaticos (regex, Presidio) pudieron no captar.
+
+Dado un texto, responde SOLO con un JSON valido con esta estructura:
+{"found": [{"text": "dato encontrado", "type": "PERSONA|EMAIL|TELEFONO|DNI|IP|IBAN|UBICACION|TARJETA_CREDITO|MATRICULA"}], "clean": true/false}
+
+Si no encuentras PII adicional, responde: {"found": [], "clean": true}
+
+Presta atencion a:
+- Nombres propios que no esten tokenizados como [PERSONA_N]
+- Telefonos en formato inusual (con texto, separadores raros)
+- DNI/NIF con separadores: "NI 23.452.321Y", "D.N.I.: 12 345 678-Z"
+- Emails ofuscados: "usuario [at] dominio [dot] com"
+- Direcciones postales parciales
+- Cualquier dato que identifique a una persona fisica
+
+NO marques como PII: nombres de servidores, servicios, tecnologias, codigos de error, IPs de redes internas conocidas (10.x, 192.168.x), ni tokens ya anonimizados [TIPO_N]."""
+
+
+class AnonymizationLLM:
+    """Small/fast LLM dedicated to PII validation. Optional enhancement over regex/Presidio."""
+
+    def __init__(self, provider: str, model: str, temperature: float = 0.0, **kwargs):
+        self.llm = AnonymizationAgent._create_llm(
+            provider=provider, model=model, temperature=temperature, **kwargs
+        )
+        self._available = True
+        logger.info("anon_llm_initialized", provider=provider, model=model)
+
+    async def validate_pii(self, text: str) -> List[Dict]:
+        """Run PII validation on text. Returns list of detected PII entities."""
+        if not self._available:
+            return []
+        try:
+            from langchain_core.messages import SystemMessage as SM, HumanMessage as HM
+            response = await self.llm.ainvoke([
+                SM(content=ANON_LLM_SYSTEM_PROMPT),
+                HM(content=f"Analiza este texto:\n\n{text}"),
+            ])
+            import json as _json
+            result = _json.loads(response.content)
+            return result.get("found", [])
+        except Exception as e:
+            logger.warning("anon_llm_validation_failed", error=str(e))
+            return []
+
+    async def filter_text(self, text: str, substitution_map: Dict[str, str]) -> str:
+        """Enhanced PII filter: run LLM validation and replace any found PII."""
+        found = await self.validate_pii(text)
+        if not found:
+            return text
+        filtered = text
+        for entity in found:
+            pii_text = entity.get("text", "")
+            pii_type = entity.get("type", "DATO")
+            if pii_text and pii_text in filtered:
+                # Check if it matches a known substitution
+                known_token = None
+                for token, val in substitution_map.items():
+                    if val == pii_text:
+                        known_token = token
+                        break
+                replacement = known_token or f"[{pii_type}_REDACTED]"
+                filtered = filtered.replace(pii_text, replacement)
+                logger.warning("anon_llm_pii_caught", type=pii_type, replacement=replacement)
+        return filtered
+
+    def update_llm(self, provider: str, model: str, temperature: float = 0.0, **kwargs):
+        """Hot-reload the anonymization LLM."""
+        self.llm = AnonymizationAgent._create_llm(
+            provider=provider, model=model, temperature=temperature, **kwargs
+        )
+        logger.info("anon_llm_hot_reloaded", provider=provider, model=model)
+
+
 class StreamingCallback(AsyncCallbackHandler):
     """Callback handler that collects tokens without streaming to client.
 
@@ -282,23 +357,27 @@ class StreamingCallback(AsyncCallbackHandler):
 
 
 class AnonymizationAgent:
-    """LangChain agent with anonymization pipeline."""
+    """LangChain agent with anonymization pipeline (Resolution Agent)."""
 
     def __init__(
         self,
         anonymizer: Anonymizer,
         db: DatabaseService,
         ws_manager: ConnectionManager,
-        encryption_key: bytes,
+        anon_llm: Optional["AnonymizationLLM"] = None,
     ):
         self.anonymizer = anonymizer
         self.db = db
         self.ws_manager = ws_manager
-        self.encryption_key = encryption_key
+        self.anon_llm = anon_llm
+        self._map_cache: Dict[int, Dict[str, str]] = {}
+        self._map_cache_max = 50
 
         # Initialize LLM based on provider
         self.llm = self._create_llm()
-        logger.info("llm_initialized", provider=settings.llm_provider)
+        logger.info("resolution_llm_initialized", provider=settings.llm_provider)
+        if anon_llm:
+            logger.info("anon_llm_attached")
 
         # Tools — keep all_tools for toggling, tools for active set
         self.all_tools = [
@@ -409,14 +488,79 @@ class AnonymizationAgent:
         return messages
 
     async def _get_substitution_map(self, ticket_id: int) -> Dict[str, str]:
-        """Load and decrypt substitution map for a ticket."""
-        encrypted = await self.db.get_substitution_map(ticket_id)
-        if encrypted:
+        """Reconstruct substitution map on-the-fly from the source ticket.
+
+        No data is persisted in DB. The map is cached in memory per session.
+        """
+        # Check in-memory cache first
+        if ticket_id in self._map_cache:
+            return self._map_cache[ticket_id]
+
+        ticket = await self.db.get_ticket(ticket_id)
+        if not ticket:
+            return {}
+
+        source_ticket_id = ticket["source_ticket_id"]
+
+        # Resolve source connector
+        from ..main import app_state
+        connector_router = app_state.get("connector_router")
+        if connector_router:
             try:
-                return Anonymizer.decrypt_map(encrypted, self.encryption_key)
-            except Exception as e:
-                logger.error("decrypt_map_failed", ticket_id=ticket_id, error=str(e))
-        return {}
+                _, source_connector = connector_router.get_connector(source_ticket_id)
+            except ValueError:
+                source_connector = app_state.get("jira_connector")
+        else:
+            source_connector = app_state.get("jira_connector")
+
+        if not source_connector:
+            logger.error("no_source_connector", ticket_id=ticket_id)
+            return {}
+
+        try:
+            # Re-read original ticket from source
+            source_ticket = await source_connector.get_ticket(source_ticket_id)
+            comments = await source_connector.get_comments(source_ticket_id)
+
+            # Assemble text EXACTLY as done during ingest
+            full_text = Anonymizer.assemble_ingest_text(
+                source_ticket.get("summary", ""),
+                source_ticket.get("description", "") or "",
+                comments,
+            )
+
+            # Check for source changes via hash
+            stored_hash = ticket.get("source_text_hash", "")
+            current_hash = Anonymizer.compute_text_hash(full_text)
+            if stored_hash and stored_hash != current_hash:
+                logger.warning(
+                    "source_text_changed",
+                    ticket_id=ticket_id,
+                    source_key=source_ticket_id,
+                    hint="Source ticket modified since ingest, tokens may differ",
+                )
+
+            # Reconstruct map
+            sub_map = self.anonymizer.reconstruct_map(full_text)
+
+            # Cache (evict oldest if full)
+            if len(self._map_cache) >= self._map_cache_max:
+                oldest_key = next(iter(self._map_cache))
+                del self._map_cache[oldest_key]
+            self._map_cache[ticket_id] = sub_map
+
+            return sub_map
+
+        except Exception as e:
+            logger.error("reconstruct_map_failed", ticket_id=ticket_id, error=str(e))
+            return {}
+
+    def invalidate_map_cache(self, ticket_id: int = None):
+        """Invalidate cached substitution map(s)."""
+        if ticket_id:
+            self._map_cache.pop(ticket_id, None)
+        else:
+            self._map_cache.clear()
 
     async def chat(
         self,
@@ -437,8 +581,10 @@ class AnonymizationAgent:
         sub_map = await self._get_substitution_map(ticket_id)
         ticket = await self.db.get_ticket(ticket_id)
 
-        # 2. PRE-filter: anonymize user input
+        # 2. PRE-filter: anonymize user input (regex + optional LLM)
         filtered_message = self.anonymizer.filter_output(user_message, sub_map)
+        if self.anon_llm:
+            filtered_message = await self.anon_llm.filter_text(filtered_message, sub_map)
 
         # 3. Load chat history
         history = await self.db.get_chat_history(ticket_id)
@@ -499,8 +645,10 @@ class AnonymizationAgent:
             await self.ws_manager.send_error(client_id, agent_text, ticket_id)
             return agent_text
 
-        # 5. POST-filter: scan response for PII leaks
+        # 5. POST-filter: scan response for PII leaks (regex + optional LLM)
         filtered_response = self.anonymizer.filter_output(agent_text, sub_map)
+        if self.anon_llm:
+            filtered_response = await self.anon_llm.filter_text(filtered_response, sub_map)
 
         # 6. Save agent response
         await self.db.add_chat_message(ticket_id, "agent", filtered_response)

@@ -1,12 +1,9 @@
 """PII detection and anonymization service with pluggable DetectionService."""
 
-import json
-import base64
-import os
+import hashlib
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import structlog
 
 logger = structlog.get_logger()
@@ -132,36 +129,33 @@ class Anonymizer:
             result = result.replace(token, real_value)
         return result
 
-    # --- Encryption for substitution map persistence ---
+    def reconstruct_map(self, original_text: str) -> Dict[str, str]:
+        """Reconstruct substitution map by re-anonymizing the original text.
+
+        The anonymize() method is deterministic: same input → same entities
+        in same order → same tokens. This allows reconstruction without
+        persisting the map.
+        """
+        _, sub_map = self.anonymize(original_text)
+        return sub_map
 
     @staticmethod
-    def generate_key() -> bytes:
-        """Generate a new AES-256-GCM key."""
-        return AESGCM.generate_key(bit_length=256)
+    def compute_text_hash(text: str) -> str:
+        """Compute SHA-256 hash of text for change detection."""
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def encrypt_map(substitution_map: Dict[str, str], key: bytes) -> bytes:
-        """Encrypt substitution map with AES-256-GCM."""
-        aesgcm = AESGCM(key)
-        nonce = os.urandom(12)
-        plaintext = json.dumps(substitution_map).encode("utf-8")
-        ciphertext = aesgcm.encrypt(nonce, plaintext, None)
-        return nonce + ciphertext  # prepend nonce for decryption
+    def assemble_ingest_text(
+        summary: str, description: str, comments: List[Dict]
+    ) -> str:
+        """Assemble the full text exactly as done during ingest.
 
-    @staticmethod
-    def decrypt_map(encrypted_data: bytes, key: bytes) -> Dict[str, str]:
-        """Decrypt substitution map from AES-256-GCM."""
-        aesgcm = AESGCM(key)
-        nonce = encrypted_data[:12]
-        ciphertext = encrypted_data[12:]
-        plaintext = aesgcm.decrypt(nonce, ciphertext, None)
-        return json.loads(plaintext.decode("utf-8"))
-
-    @staticmethod
-    def key_from_string(key_str: str) -> bytes:
-        """Convert base64-encoded key string to bytes."""
-        if not key_str:
-            # Generate and log a warning for development
-            logger.warning("no_encryption_key_set, generating ephemeral key")
-            return Anonymizer.generate_key()
-        return base64.b64decode(key_str)
+        This MUST match the assembly in ingest_confirm() to guarantee
+        deterministic reconstruction of the substitution map.
+        """
+        comments_text = ""
+        if comments:
+            comments_text = "\n\n--- COMENTARIOS ---\n" + "\n---\n".join(
+                f"{c.get('author', 'Unknown')}: {c.get('body', '')}" for c in comments
+            )
+        return f"{summary}\n{description}{comments_text}"

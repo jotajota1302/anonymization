@@ -47,7 +47,7 @@ export interface AgentConfig {
   ollama_config?: { base_url: string; available_models: string[] };
   openai_config?: { api_key_masked: string; model: string; available_models: string[] };
   azure_config?: { endpoint_masked: string; deployment: string; api_version: string };
-  axet_config?: { project_id: string; asset_id: string };
+  axet_config?: { project_id: string; asset_id: string; model?: string; token_masked?: string };
 }
 
 export interface AgentTool {

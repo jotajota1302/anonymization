@@ -1,10 +1,10 @@
 # Propuesta de Arquitectura: Plataforma de Anonimizacion de Ticketing
 
-**Version:** 1.6
+**Version:** 1.7
 **Fecha original:** 13 de Marzo de 2026
-**Ultima actualizacion:** 15 de Marzo de 2026
+**Ultima actualizacion:** 18 de Marzo de 2026
 **Equipo:** NTT DATA EMEAL
-**Estado:** Piloto implementado con Presidio NLP configurable desde UI, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional (integraciones + anonimizacion + admin tickets), renderizado Markdown en chat, notificaciones toast/modal, soporte tri-provider LLM (Ollama/OpenAI/Azure), test de conexion LLM desde UI, guia de despliegue Azure completa y 56 tests — pendiente validacion (Fase 4)
+**Estado:** Piloto implementado con Presidio NLP configurable desde UI, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional (integraciones + anonimizacion + admin tickets), renderizado Markdown en chat, notificaciones toast/modal, soporte tri-provider LLM (Ollama/OpenAI/Azure), test de conexion LLM desde UI, guia de despliegue Azure completa, 56 tests, **arquitectura dual-agent** (LLM anonimizacion + LLM resolucion), **filtros de origen con JQL dinamico**, **buscador en pendientes**, **eliminacion de datos PII de BBDD** (mapa sustitucion reconstruido on-the-fly) — pendiente validacion (Fase 4)
 
 ---
 
@@ -651,15 +651,18 @@ Ticket PESESG-123:
 **Nota:** Los tipos `SISTEMA` y `UBICACION` mostrados en la propuesta v1.0 no se detectan
 automaticamente. No existe regex para direcciones ni para nombres de servidores.
 
-**Reglas de seguridad (implementadas):**
-- Almacenado cifrado con AES-256-GCM en SQLite (nonce 12 bytes + ciphertext)
+**Reglas de seguridad (implementadas — v1.7 sin persistencia):**
+- **Ya NO se almacena** el mapa de sustitucion en la BBDD (tabla `substitution_map` eliminada)
+- El mapa se **reconstruye on-the-fly** re-leyendo el ticket origen y re-ejecutando `anonymize()` (determinista)
+- Cache LRU en memoria (max 50 tickets) para evitar llamadas repetidas al origen durante una sesion de chat
+- Hash SHA-256 del texto original almacenado en `ticket_mapping.source_text_hash` para detectar cambios en el origen
 - Solo accesible por el servicio backend, nunca expuesto al frontend
 - Los tokens son unicos POR TICKET (no reutilizados entre tickets)
-- Se destruye cuando el ticket se cierra (`delete_substitution_map`)
-- La clave de cifrado se configura en `.env` (`ENCRYPTION_KEY`, base64 de 32 bytes)
+- Al cerrar ticket se invalida la cache en memoria
+- Cifrado AES-256-GCM y `ENCRYPTION_KEY` eliminados (ya no son necesarios)
 
-**Diferencia con propuesta v1.0:** El cifrado esta integrado directamente en `Anonymizer`
-(metodos estaticos), no en un `utils/crypto.py` separado.
+**Diferencia con v1.6:** Se elimino toda persistencia de datos PII cifrados en BBDD.
+El mapa se reconstruye desde el sistema origen, eliminando el riesgo de exfiltracion de datos cifrados.
 
 ### 4.4 Conectores
 
@@ -747,14 +750,8 @@ CREATE TABLE ticket_mapping (
     UNIQUE(source_system, source_ticket_id)
 );
 
--- Mapa de sustitucion (cifrado AES-256-GCM)
-CREATE TABLE substitution_map (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticket_mapping_id INTEGER NOT NULL REFERENCES ticket_mapping(id),
-    encrypted_map BLOB NOT NULL,           -- nonce(12 bytes) + ciphertext AES-256-GCM
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
-);
+-- Tabla substitution_map ELIMINADA en v1.7
+-- El mapa de sustitucion se reconstruye on-the-fly desde el sistema origen
 
 -- Historial de chat por ticket
 CREATE TABLE chat_history (
@@ -882,7 +879,7 @@ CREATE TABLE system_config (
 |---|---|---|---|
 | LLM filtra PII en respuesta | Baja | Triple barrera: pre-LLM + prompt + post-LLM | ✅ |
 | Operador deduce datos por contexto | Baja | Tokens consistentes por ticket | ✅ |
-| Mapa de sustitucion comprometido | Muy baja | Cifrado AES-256-GCM en reposo | ✅ |
+| Mapa de sustitucion comprometido | Eliminado | Mapa ya no se persiste en BBDD (v1.7). Se reconstruye on-the-fly | ✅ |
 | Adjuntos con PII visible | Media | AttachmentProcessor + read_attachment + Presidio Image Redactor | ✅ |
 | Accion tecnica no segura | Media | Allowlist + auditoria. Acciones simuladas en piloto | ✅ (simulado) |
 | Caso ambiguo no anonimizable | Media | Escalado a onshore | ⚠️ No implementado |
@@ -1277,6 +1274,10 @@ KOSIN como repositorio interno anonimizado, y un catalogo cerrado de acciones te
 - **56 tests** (v1.3): cobertura completa de deteccion, anonimizacion, redaccion de imagenes y conectores
 
 - **Guia de despliegue Azure** (v1.6): documentacion completa para produccion (`docs/DEPLOYMENT_AZURE.md`)
+- **Arquitectura dual-agent** (v1.7): LLM pequeno (`AnonymizationLLM`) para validacion PII + LLM potente (`ResolutionAgent`) para chat y tools. Configurable via `ANON_LLM_PROVIDER`/`ANON_LLM_MODEL`
+- **Filtros de origen con JQL dinamico** (v1.7): filtros por fecha, prioridad, estado, tipo y max resultados. Presets rapidos (ultima semana/mes). Panel colapsable en frontend
+- **Buscador en incidencias pendientes** (v1.7): busqueda client-side por clave, tipo, estado, prioridad y sistema origen con contador de resultados
+- **Eliminacion de datos PII de BBDD** (v1.7): tabla `substitution_map` eliminada. Mapa reconstruido on-the-fly desde sistema origen (determinista). Cache LRU en memoria. Hash SHA-256 para detectar cambios en origen. Cifrado AES-256-GCM eliminado
 
 **Principales elementos pendientes:**
 - Autenticacion de operadores (JWT/SSO)

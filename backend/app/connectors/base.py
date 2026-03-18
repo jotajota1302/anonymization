@@ -2,6 +2,18 @@
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
+from dataclasses import dataclass, field
+
+
+@dataclass
+class BoardFilters:
+    """Filters for board issue queries."""
+    max_results: int = 50
+    date_from: Optional[str] = None  # YYYY-MM-DD
+    date_to: Optional[str] = None    # YYYY-MM-DD
+    priority: Optional[List[str]] = None
+    status: Optional[List[str]] = None
+    issue_type: Optional[List[str]] = None
 
 
 class TicketConnector(ABC):

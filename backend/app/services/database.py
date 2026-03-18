@@ -20,17 +20,10 @@ CREATE TABLE IF NOT EXISTS ticket_mapping (
     anonymized_description TEXT NOT NULL DEFAULT '',
     priority TEXT NOT NULL DEFAULT 'medium',
     status TEXT DEFAULT 'open',
+    source_text_hash TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     closed_at TIMESTAMP,
     UNIQUE(source_system, source_ticket_id)
-);
-
-CREATE TABLE IF NOT EXISTS substitution_map (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticket_mapping_id INTEGER NOT NULL REFERENCES ticket_mapping(id),
-    encrypted_map BLOB NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS chat_history (
@@ -86,11 +79,29 @@ class DatabaseService:
             os.makedirs(dir_path, exist_ok=True)
 
     async def init(self):
-        """Initialize database schema."""
+        """Initialize database schema and run migrations."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA journal_mode=WAL")
             await db.execute("PRAGMA busy_timeout=5000")
             await db.executescript(DB_SCHEMA)
+
+            # Migration: drop substitution_map table if it exists
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='substitution_map'"
+            )
+            if await cursor.fetchone():
+                await db.execute("DROP TABLE substitution_map")
+                logger.info("migration_dropped_substitution_map")
+
+            # Migration: add source_text_hash column if missing
+            cursor = await db.execute("PRAGMA table_info(ticket_mapping)")
+            columns = [row[1] for row in await cursor.fetchall()]
+            if "source_text_hash" not in columns:
+                await db.execute(
+                    "ALTER TABLE ticket_mapping ADD COLUMN source_text_hash TEXT NOT NULL DEFAULT ''"
+                )
+                logger.info("migration_added_source_text_hash")
+
             await db.commit()
         logger.info("database_initialized", path=self.db_path)
 
@@ -130,13 +141,13 @@ class DatabaseService:
     async def create_ticket_mapping(
         self, source_system: str, source_ticket_id: str,
         kosin_ticket_id: str, summary: str, anonymized_description: str,
-        priority: str = "medium"
+        priority: str = "medium", source_text_hash: str = ""
     ) -> int:
         return await self.execute(
             """INSERT INTO ticket_mapping
-               (source_system, source_ticket_id, kosin_ticket_id, summary, anonymized_description, priority)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (source_system, source_ticket_id, kosin_ticket_id, summary, anonymized_description, priority)
+               (source_system, source_ticket_id, kosin_ticket_id, summary, anonymized_description, priority, source_text_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (source_system, source_ticket_id, kosin_ticket_id, summary, anonymized_description, priority, source_text_hash)
         )
 
     async def get_ticket(self, ticket_id: int) -> Optional[dict]:
@@ -187,41 +198,9 @@ class DatabaseService:
         """Delete a ticket mapping and all related data (cascade)."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("DELETE FROM chat_history WHERE ticket_mapping_id = ?", (ticket_id,))
-            await db.execute("DELETE FROM substitution_map WHERE ticket_mapping_id = ?", (ticket_id,))
             await db.execute("DELETE FROM audit_log WHERE ticket_mapping_id = ?", (ticket_id,))
             await db.execute("DELETE FROM ticket_mapping WHERE id = ?", (ticket_id,))
             await db.commit()
-
-    # --- Substitution Map ---
-
-    async def save_substitution_map(self, ticket_mapping_id: int, encrypted_map: bytes):
-        existing = await self.fetchone(
-            "SELECT id FROM substitution_map WHERE ticket_mapping_id = ?",
-            (ticket_mapping_id,)
-        )
-        if existing:
-            await self.execute(
-                "UPDATE substitution_map SET encrypted_map = ?, updated_at = ? WHERE ticket_mapping_id = ?",
-                (encrypted_map, datetime.utcnow().isoformat(), ticket_mapping_id)
-            )
-        else:
-            await self.execute(
-                "INSERT INTO substitution_map (ticket_mapping_id, encrypted_map) VALUES (?, ?)",
-                (ticket_mapping_id, encrypted_map)
-            )
-
-    async def get_substitution_map(self, ticket_mapping_id: int) -> Optional[bytes]:
-        row = await self.fetchone(
-            "SELECT encrypted_map FROM substitution_map WHERE ticket_mapping_id = ?",
-            (ticket_mapping_id,)
-        )
-        return row["encrypted_map"] if row else None
-
-    async def delete_substitution_map(self, ticket_mapping_id: int):
-        await self.execute(
-            "DELETE FROM substitution_map WHERE ticket_mapping_id = ?",
-            (ticket_mapping_id,)
-        )
 
     # --- Chat History ---
 

@@ -4,7 +4,7 @@ from typing import List, Dict, Optional
 import structlog
 import httpx
 
-from .base import TicketConnector
+from .base import TicketConnector, BoardFilters
 from ..config import settings
 
 logger = structlog.get_logger()
@@ -246,13 +246,35 @@ class KosinConnector(TicketConnector):
             logger.error("kosin_comment_failed", error=error_msg, error_type=type(e).__name__)
             return False
 
-    async def get_board_issues(self) -> List[Dict]:
-        """Get open issues from the KOSIN project via JQL search."""
-        jql = (
-            f'project={self.project} '
-            f'AND status in (Open, "In Progress", "To Do") '
-            f'ORDER BY created DESC'
-        )
+    async def get_board_issues(self, filters: Optional[BoardFilters] = None) -> List[Dict]:
+        """Get open issues from the KOSIN project via JQL search with optional filters."""
+        filters = filters or BoardFilters()
+
+        # Build JQL dynamically
+        jql_parts = [f'project={self.project}']
+
+        if filters.status:
+            status_str = ", ".join(f'"{s}"' for s in filters.status)
+            jql_parts.append(f'status in ({status_str})')
+        else:
+            jql_parts.append('status in (Open, "In Progress", "To Do")')
+
+        if filters.priority:
+            priority_str = ", ".join(f'"{p}"' for p in filters.priority)
+            jql_parts.append(f'priority in ({priority_str})')
+
+        if filters.issue_type:
+            type_str = ", ".join(f'"{t}"' for t in filters.issue_type)
+            jql_parts.append(f'issuetype in ({type_str})')
+
+        if filters.date_from:
+            jql_parts.append(f'created >= "{filters.date_from}"')
+
+        if filters.date_to:
+            jql_parts.append(f'created <= "{filters.date_to}"')
+
+        jql = " AND ".join(jql_parts) + " ORDER BY created DESC"
+
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(
@@ -260,7 +282,7 @@ class KosinConnector(TicketConnector):
                     headers=self._headers,
                     params={
                         "jql": jql,
-                        "maxResults": 20,
+                        "maxResults": filters.max_results,
                         "fields": "summary,status,priority,issuetype",
                     },
                 )

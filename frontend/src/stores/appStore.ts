@@ -1,6 +1,24 @@
 import { create } from "zustand";
 import { TicketSummary, ChatMessage, BoardTicket } from "@/types";
 
+export interface BoardFilters {
+  max_results: number;
+  date_from: string | null;
+  date_to: string | null;
+  priority: string[] | null;
+  status: string[] | null;
+  issue_type: string[] | null;
+}
+
+const DEFAULT_BOARD_FILTERS: BoardFilters = {
+  max_results: 50,
+  date_from: null,
+  date_to: null,
+  priority: null,
+  status: null,
+  issue_type: null,
+};
+
 interface AppState {
   tickets: TicketSummary[];
   boardTickets: BoardTicket[];
@@ -15,9 +33,12 @@ interface AppState {
   isLoadingTickets: boolean;
   piiWarnings: Record<number, string>;
   suggestedChips: string[];
+  boardFilters: BoardFilters;
 
   setTickets: (tickets: TicketSummary[]) => void;
   setBoardTickets: (tickets: BoardTicket[]) => void;
+  setBoardFilters: (filters: Partial<BoardFilters>) => void;
+  resetBoardFilters: () => void;
   selectTicket: (id: number | null) => void;
   selectBoardTicket: (key: string | null) => void;
   addMessage: (ticketId: number, msg: ChatMessage) => void;
@@ -48,10 +69,18 @@ export const useAppStore = create<AppState>((set) => ({
   isLoadingTickets: true,
   piiWarnings: {},
   suggestedChips: [],
+  boardFilters: { ...DEFAULT_BOARD_FILTERS },
 
   setTickets: (tickets) => set({ tickets }),
 
   setBoardTickets: (boardTickets) => set({ boardTickets }),
+
+  setBoardFilters: (filters) =>
+    set((state) => ({
+      boardFilters: { ...state.boardFilters, ...filters },
+    })),
+
+  resetBoardFilters: () => set({ boardFilters: { ...DEFAULT_BOARD_FILTERS } }),
 
   selectTicket: (id) => set({ selectedTicketId: id, selectedBoardKey: null, streamingContent: "", suggestedChips: [] }),
 

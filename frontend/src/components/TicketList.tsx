@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { TicketSummary, BoardTicket } from "@/types";
 import { TicketCard } from "./TicketCard";
+import { useAppStore, BoardFilters } from "@/stores/appStore";
 
 const priorityConfig: Record<string, { color: string; shadow: string; label: string }> = {
   Critical: { color: "#EF4444", shadow: "rgba(239,68,68,0.5)", label: "Critica" },
@@ -22,17 +23,34 @@ interface Props {
   selectedBoardKey: string | null;
   onSelectTicket: (id: number) => void;
   onSelectBoardTicket: (key: string) => void;
+  onApplyFilters?: () => void;
   isLoadingBoard?: boolean;
   isLoadingTickets?: boolean;
 }
 
 type ListTab = "pendientes" | "en_atencion";
 
-export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBoardKey, onSelectTicket, onSelectBoardTicket, isLoadingBoard, isLoadingTickets }: Props) {
+export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBoardKey, onSelectTicket, onSelectBoardTicket, onApplyFilters, isLoadingBoard, isLoadingTickets }: Props) {
   const [activeTab, setActiveTab] = useState<ListTab>("pendientes");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [showFilters, setShowFilters] = useState(false);
+  const { boardFilters, setBoardFilters, resetBoardFilters } = useAppStore();
 
   const pendingBoard = boardTickets.filter((bt) => !bt.already_ingested);
   const activeTickets = tickets.filter((t) => t.status !== "closed");
+
+  const filteredPending = searchQuery.trim()
+    ? pendingBoard.filter((bt) => {
+        const q = searchQuery.toLowerCase();
+        return (
+          bt.key.toLowerCase().includes(q) ||
+          bt.issue_type.toLowerCase().includes(q) ||
+          bt.status.toLowerCase().includes(q) ||
+          bt.priority.toLowerCase().includes(q) ||
+          bt.source_system.toLowerCase().includes(q)
+        );
+      })
+    : pendingBoard;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -97,8 +115,96 @@ export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBo
         )}
 
         {activeTab === "pendientes" && !isLoadingBoard && (
-          <div className="space-y-3" role="list" aria-label="Incidencias pendientes">
-            {pendingBoard.map((bt) => {
+          <div className="space-y-3">
+            {/* Buscador */}
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar por clave, tipo, estado..."
+                className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+              )}
+            </div>
+            {searchQuery && (
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                {filteredPending.length} de {pendingBoard.length} incidencias
+              </p>
+            )}
+            {/* Filtros de origen */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-colors"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Filtros
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform ${showFilters ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              {/* Presets rapidos */}
+              <button onClick={() => { const d = new Date(); d.setDate(d.getDate() - 7); setBoardFilters({ date_from: d.toISOString().split("T")[0], date_to: null }); onApplyFilters?.(); }}
+                className="px-2 py-1 text-xs rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors">
+                Ult. semana
+              </button>
+              <button onClick={() => { const d = new Date(); d.setMonth(d.getMonth() - 1); setBoardFilters({ date_from: d.toISOString().split("T")[0], date_to: null }); onApplyFilters?.(); }}
+                className="px-2 py-1 text-xs rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors">
+                Ult. mes
+              </button>
+              <button onClick={() => { resetBoardFilters(); onApplyFilters?.(); }}
+                className="px-2 py-1 text-xs rounded-md bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                Todas
+              </button>
+            </div>
+            {showFilters && (
+              <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">Desde</label>
+                    <input type="date" value={boardFilters.date_from || ""} onChange={(e) => setBoardFilters({ date_from: e.target.value || null })}
+                      className="w-full px-2 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">Hasta</label>
+                    <input type="date" value={boardFilters.date_to || ""} onChange={(e) => setBoardFilters({ date_to: e.target.value || null })}
+                      className="w-full px-2 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">Prioridad</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {["Critical", "High", "Medium", "Low"].map((p) => {
+                      const active = boardFilters.priority?.includes(p);
+                      return (
+                        <button key={p} onClick={() => {
+                          const current = boardFilters.priority || [];
+                          setBoardFilters({ priority: active ? current.filter((x) => x !== p) : [...current, p] });
+                        }}
+                          className={`px-2 py-1 text-xs rounded-md border transition-colors ${active ? "bg-primary/10 border-primary/30 text-primary font-bold" : "border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"}`}>
+                          {priorityConfig[p]?.label || p}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">Max. resultados</label>
+                  <input type="number" min={1} max={200} value={boardFilters.max_results} onChange={(e) => setBoardFilters({ max_results: Number(e.target.value) || 50 })}
+                    className="w-20 px-2 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200" />
+                </div>
+                <button onClick={() => { onApplyFilters?.(); setShowFilters(false); }}
+                  className="w-full py-1.5 text-xs font-bold rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors">
+                  Aplicar filtros
+                </button>
+              </div>
+            )}
+            <div role="list" aria-label="Incidencias pendientes" className="space-y-3">
+            {filteredPending.map((bt) => {
               const priority = priorityConfig[bt.priority] || priorityConfig.Medium;
               const isSelected = bt.key === selectedBoardKey;
               const srcLabel = sourceSystemLabels[bt.source_system] || bt.source_system;
@@ -138,7 +244,12 @@ export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBo
                 </div>
               );
             })}
-            {pendingBoard.length === 0 && <p className="text-xs text-slate-500 text-center py-8">Sin incidencias pendientes</p>}
+            {filteredPending.length === 0 && (
+              <p className="text-xs text-slate-500 text-center py-8">
+                {searchQuery ? "Sin resultados para la busqueda" : "Sin incidencias pendientes"}
+              </p>
+            )}
+            </div>
           </div>
         )}
 
