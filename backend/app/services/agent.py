@@ -1,6 +1,7 @@
 """LangChain anonymization agent with multi-provider LLM support (Ollama, Azure OpenAI)."""
 
 import json
+import re
 from typing import Dict, List, Optional, AsyncGenerator
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -130,6 +131,10 @@ Recibes texto que ya ha pasado por un pipeline automatico de deteccion. Los dato
 detectados se han reemplazado por tokens `[TIPO_N]` (ej: `[PERSONA_1]`, `[EMAIL_2]`). \
 Tu trabajo es encontrar PII **residual** que el pipeline no detecto.
 
+NOTA: Es posible que los detectores regex y/o Presidio esten desactivados. En ese caso, \
+el texto puede contener PII en claro que normalmente ya estaria tokenizada. \
+Si ves datos personales reales sin tokenizar, DEBES marcarlos.
+
 # RESPUESTA
 Responde SOLO con JSON valido. Sin texto adicional, sin explicaciones, sin markdown.
 
@@ -140,7 +145,7 @@ Si el texto esta limpio:
 {"found": [], "clean": true}
 
 Tipos validos para "type": PERSONA, EMAIL, TELEFONO, DNI, IP, IBAN, UBICACION, \
-TARJETA_CREDITO, MATRICULA, ORGANIZACION, DATO
+DIRECCION, TARJETA_CREDITO, MATRICULA, ORGANIZACION, DATO
 
 # QUE BUSCAR (PII que el regex/Presidio suele fallar)
 
@@ -169,17 +174,26 @@ TARJETA_CREDITO, MATRICULA, ORGANIZACION, DATO
 - PII dentro de campos tabulados que el regex no parsea bien
 - Nombres o emails en lineas de log: `user=jgarcia@empresa.com action=login`
 
-# QUE NO ES PII (no marcar como encontrado)
-- Tokens ya anonimizados: `[PERSONA_1]`, `[EMAIL_3]`, etc.
+# QUE NO ES PII (CRITICO — no marcar como encontrado)
+- **Tokens ya anonimizados** en CUALQUIER formato: `[PERSONA_1]`, `[EMAIL_3]`, `[ES_NIF_8]`, \
+`[UBICACION_REDACTED]`, `[DNI_2]`, `[TELEFONO_1]`, etc. Todo texto entre corchetes con \
+formato `[TIPO_N]` o `[TIPO_REDACTED]` es un token de anonimizacion, NO PII.
 - Nombres de servidores, servicios o aplicaciones: `auth-server-01`, `PostgreSQL`
 - IPs de redes internas: `10.x.x.x`, `192.168.x.x`, `172.16-31.x.x`
 - Codigos tecnicos: `ERR_CONNECTION_REFUSED`, `HTTP 500`, `ORA-12541`
-- Nombres de productos, frameworks o tecnologias
+- Nombres de productos, frameworks o tecnologias: `SAP`, `SharePoint`, `Solution Manager`
+- Codigos de transaccion SAP: `SE38`, `SE80`, `SM37`, etc.
 - Fechas y timestamps
 - Nombres de campos o etiquetas: "Nombre:", "Email:", "Telefono:"
+- **Frases genericas de procedimiento**: "lineas de actuacion", "plan de accion", \
+"verificar estado", "comprobar disponibilidad", "validar configuracion"
+- **Verbos y sustantivos comunes**: "actuacion", "gestion", "configuracion", "validacion", etc.
+- **Terminos de negocio/ITSM**: "incidencia", "requerimiento", "entregable", \
+"documentacion tecnica", "repositorio documental"
 
 # PRINCIPIO
-Ante la duda, marca como PII. Un falso positivo es preferible a filtrar un dato real."""
+Marca como PII solo datos que identifiquen o puedan identificar a una persona fisica. \
+No marques terminologia tecnica, de negocio o frases genericas como PII."""
 
 
 class AnonymizationLLM:
@@ -210,6 +224,9 @@ class AnonymizationLLM:
             logger.warning("anon_llm_validation_failed", error=str(e))
             return []
 
+    # Regex to detect existing anonymization tokens — must NOT be treated as PII
+    _TOKEN_PATTERN = re.compile(r'^\[[A-Z_]+_(?:\d+|REDACTED)\]$')
+
     async def filter_text(self, text: str, substitution_map: Dict[str, str]) -> str:
         """Enhanced PII filter: run LLM validation and replace any found PII."""
         found = await self.validate_pii(text)
@@ -219,16 +236,23 @@ class AnonymizationLLM:
         for entity in found:
             pii_text = entity.get("text", "")
             pii_type = entity.get("type", "DATO")
-            if pii_text and pii_text in filtered:
-                # Check if it matches a known substitution
-                known_token = None
-                for token, val in substitution_map.items():
-                    if val == pii_text:
-                        known_token = token
-                        break
-                replacement = known_token or f"[{pii_type}_REDACTED]"
-                filtered = filtered.replace(pii_text, replacement)
-                logger.warning("anon_llm_pii_caught", type=pii_type, replacement=replacement)
+            if not pii_text or pii_text not in filtered:
+                continue
+
+            # Skip if the LLM mistakenly flagged an existing anonymization token
+            if self._TOKEN_PATTERN.match(pii_text):
+                logger.debug("anon_llm_skipped_token", text=pii_text)
+                continue
+
+            # Check if it matches a known substitution value
+            known_token = None
+            for token, val in substitution_map.items():
+                if val == pii_text:
+                    known_token = token
+                    break
+            replacement = known_token or f"[{pii_type}_REDACTED]"
+            filtered = filtered.replace(pii_text, replacement)
+            logger.warning("anon_llm_pii_caught", type=pii_type, replacement=replacement)
         return filtered
 
     def update_llm(self, provider: str, model: str, temperature: float = 0.0, **kwargs):
@@ -395,6 +419,11 @@ class AnonymizationAgent:
         """Reconstruct substitution map on-the-fly from the source ticket.
 
         No data is persisted in DB. The map is cached in memory per session.
+
+        IMPORTANT: Always uses a full CompositeDetector for reconstruction,
+        regardless of the currently active detector. This ensures the map
+        matches what was generated during ingest even if the user later
+        disables regex or Presidio.
         """
         # Check in-memory cache first
         if ticket_id in self._map_cache:
@@ -444,8 +473,39 @@ class AnonymizationAgent:
                     hint="Source ticket modified since ingest, tokens may differ",
                 )
 
-            # Reconstruct map
-            sub_map = self.anonymizer.reconstruct_map(full_text)
+            # Reconstruct map using a FULL composite detector (not the current one)
+            # so that the map matches what was used during ingest
+            from .detection import CompositeDetector
+            try:
+                # Load presidio config from DB if available
+                anon_config = None
+                try:
+                    row = await self.db.get_system_config("anonymization")
+                    if row and row.get("extra_config"):
+                        import json
+                        raw = row["extra_config"]
+                        anon_config = json.loads(raw) if isinstance(raw, str) else raw
+                except Exception:
+                    pass
+
+                presidio_cfg = {}
+                if anon_config:
+                    presidio_cfg = {
+                        "score_threshold": anon_config.get("presidio_sensitivity", 65),
+                        "enabled_entities": anon_config.get("presidio_entities"),
+                        "excluded_words": anon_config.get("presidio_excluded_words"),
+                        "min_lengths": anon_config.get("presidio_min_lengths"),
+                        "model_name": anon_config.get("presidio_model", "es_core_news_lg"),
+                    }
+
+                reconstruction_detector = CompositeDetector(presidio_config=presidio_cfg)
+            except Exception as e:
+                logger.warning("composite_detector_for_reconstruction_failed", error=str(e),
+                               fallback="current_detector")
+                reconstruction_detector = self.anonymizer._detector
+
+            reconstruction_anonymizer = Anonymizer(detector=reconstruction_detector)
+            sub_map = reconstruction_anonymizer.reconstruct_map(full_text)
 
             # Cache (evict oldest if full)
             if len(self._map_cache) >= self._map_cache_max:

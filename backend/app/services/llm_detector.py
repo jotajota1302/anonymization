@@ -1,4 +1,9 @@
-"""LLM-based PII detection — finds all personal data the structured detectors miss."""
+"""LLM-based PII detection — finds personal data the structured detectors miss.
+
+When regex/Presidio are disabled, this becomes the PRIMARY detector and must
+find ALL types of PII (names, emails, phones, IDs, addresses, etc.).
+When regex/Presidio are active, it focuses on names (their weak spot).
+"""
 
 import json
 import re
@@ -10,9 +15,8 @@ from .anonymizer import PiiEntity
 
 logger = structlog.get_logger()
 
-# The LLM's job: find ALL person names regardless of what regex/presidio found.
-# Structured data (DNI, email, phone) is already well covered by regex.
-DETECTION_PROMPT = """Analiza este texto y extrae TODOS los nombres de persona que aparezcan.
+# Prompt when regex/Presidio ARE active — focus on names (their weak spot)
+DETECTION_PROMPT_NAMES_ONLY = """Analiza este texto y extrae TODOS los nombres de persona que aparezcan.
 
 ## Texto:
 ---
@@ -43,18 +47,92 @@ Si no hay nombres, responde: []
 Responde SOLO el JSON."""
 
 
+# Prompt when regex/Presidio are DISABLED — LLM must detect ALL PII types
+DETECTION_PROMPT_FULL = """Eres el detector principal de datos personales (PII) de una plataforma GDPR.
+Los detectores automaticos (regex y Presidio NLP) estan DESACTIVADOS. Tu eres la UNICA barrera
+de proteccion. Debes encontrar TODOS los datos personales en el texto.
+
+## Texto a analizar:
+---
+{text}
+---
+
+## Tipos de PII que DEBES detectar:
+
+| Tipo | Ejemplos |
+|------|----------|
+| PERSONA | Nombres propios: "Juan Garcia", "LOPEZ MARTINEZ, ANA", "Sr. Perez", nombres sueltos como "Francisca" |
+| EMAIL | Correos: "usuario@empresa.com", "juan.garcia [at] gmail.com" |
+| TELEFONO | Telefonos: "+34 612 345 678", "912-345-678", "ext. 4521" |
+| DNI | Documentos: "12345678Z", "X-1234567-W", "NIF: B12345678", "NIE: Y0123456H" |
+| IBAN | Cuentas bancarias: "ES76 2100 0813 6101 2345 6789" |
+| DIRECCION | Direcciones postales: "Calle Mayor 15, 3o B", "Avda. Constitucion s/n", "28001 Madrid" |
+| UBICACION | Ciudades/pueblos mencionados como datos personales (NO como contexto tecnico): "vive en Sevilla", "oficina de Barcelona" |
+| ORGANIZACION | Empresas/entidades vinculadas a personas: "trabaja en Telefonica", "cliente de BBVA" |
+| TARJETA_CREDITO | Numeros de tarjeta: "4111 1111 1111 1111" |
+| MATRICULA | Matriculas de vehiculos: "1234 BCD" |
+## Reglas criticas:
+1. Extrae el texto EXACTO como aparece (respeta mayusculas/minusculas).
+2. Ante la duda, MARCA como PII. Un falso positivo es preferible a filtrar un dato real.
+3. Los nombres en formatos tabulares (junto a NIF, numeros de personal) son SIEMPRE personas.
+
+## QUE NO ES PII (no marcar):
+- Tokens ya anonimizados: `[PERSONA_1]`, `[EMAIL_3]`, etc.
+- Nombres de servidores, servicios, aplicaciones: `auth-server-01`, `PostgreSQL`, `SAP`
+- IPs de redes internas: `10.x.x.x`, `192.168.x.x`
+- Codigos de error: `ERR_CONNECTION_REFUSED`, `HTTP 500`, `ORA-12541`
+- Nombres de productos, frameworks o tecnologias
+- Fechas y timestamps (a menos que sean fecha de nacimiento)
+- Etiquetas de campos: "Nombre:", "Email:", "Telefono:" (son etiquetas, no datos)
+- Terminos tecnicos: SE38, SE80, Solution Manager, SharePoint, ALM
+- Frases genericas de procedimiento: "lineas de actuacion", "verificar estado"
+
+## Formato de respuesta — SOLO un JSON array:
+[
+  {{"text": "TEXTO_EXACTO", "entity_type": "TIPO"}},
+  ...
+]
+
+Si no hay PII, responde: []
+Responde SOLO el JSON."""
+
+
+# Valid entity types the LLM can return
+VALID_ENTITY_TYPES = {
+    "PERSONA", "EMAIL", "TELEFONO", "DNI", "IP", "IBAN",
+    "DIRECCION", "UBICACION", "ORGANIZACION", "TARJETA_CREDITO",
+    "MATRICULA", "DATO",
+}
+
+
 async def llm_detect_pii(
     text: str,
     already_detected: List[PiiEntity],
     llm,
+    detectors_active: bool = True,
 ) -> List[PiiEntity]:
-    """Use LLM to find person names that regex/presidio missed.
+    """Use LLM to find PII that regex/presidio missed.
 
-    The LLM finds ALL names. We then filter out what's already detected
-    at the same position, keeping only genuinely new entities or
-    reclassifying mistyped ones (e.g. ORGANIZACION -> PERSONA).
+    Args:
+        text: Full text to analyze.
+        already_detected: Entities already found by regex/Presidio.
+        llm: LangChain LLM instance.
+        detectors_active: If False, regex/Presidio are disabled and
+            the LLM must detect ALL PII types (not just names).
     """
-    prompt = DETECTION_PROMPT.format(text=text[:6000])
+    if detectors_active and len(already_detected) > 0:
+        # Regex/Presidio are active and already found things — focus on names
+        prompt_template = DETECTION_PROMPT_NAMES_ONLY
+    else:
+        # No detectors or they found nothing — LLM is the primary detector
+        prompt_template = DETECTION_PROMPT_FULL
+        logger.info(
+            "llm_detector_full_mode",
+            reason="no_detectors" if not detectors_active else "no_prior_detections",
+            text_length=len(text),
+        )
+
+    prompt = prompt_template.format(text=text[:6000])
 
     try:
         from langchain_core.messages import HumanMessage
@@ -76,9 +154,10 @@ async def llm_detect_pii(
 
     # Build index of already-detected spans for overlap/reclassification check
     detected_spans = {(e.start, e.end, e.text): e for e in already_detected}
-    detected_persona_texts = {
-        e.text for e in already_detected if e.entity_type == "PERSONA"
-    }
+    detected_texts_by_type = {}
+    for e in already_detected:
+        detected_texts_by_type.setdefault(e.entity_type, set()).add(e.text)
+
     # Types that the LLM can reclassify as PERSONA (Presidio often confuses these)
     RECLASSIFIABLE_TYPES = {"ORGANIZACION", "UBICACION"}
 
@@ -89,11 +168,17 @@ async def llm_detect_pii(
         if not isinstance(item, dict):
             continue
         entity_text = item.get("text", "").strip()
+        entity_type = item.get("entity_type", "PERSONA").upper().strip()
+
         if not entity_text or len(entity_text) < 2:
             continue
 
-        # Skip if already detected as PERSONA with this exact text
-        if entity_text in detected_persona_texts:
+        # Normalize entity type
+        if entity_type not in VALID_ENTITY_TYPES:
+            entity_type = "DATO"
+
+        # Skip if already detected with same type and text
+        if entity_text in detected_texts_by_type.get(entity_type, set()):
             continue
 
         # Find all occurrences in original text
@@ -116,11 +201,14 @@ async def llm_detect_pii(
                 # New entity not covered by any detector
                 new_entities.append(PiiEntity(
                     text=entity_text,
-                    entity_type="PERSONA",
+                    entity_type=entity_type,
                     start=pos,
                     end=end,
                 ))
-            elif covering_entity.entity_type in RECLASSIFIABLE_TYPES:
+            elif (
+                entity_type == "PERSONA"
+                and covering_entity.entity_type in RECLASSIFIABLE_TYPES
+            ):
                 # Presidio misclassified this as ORG/LOCATION — reclassify to PERSONA
                 reclassified.append(PiiEntity(
                     text=covering_entity.text,
@@ -140,6 +228,7 @@ async def llm_detect_pii(
 
     logger.info(
         "llm_detector_done",
+        mode="full" if not detectors_active or not already_detected else "names_only",
         llm_found=len(items),
         new_entities=len(new_entities),
         reclassified=len(reclassified),

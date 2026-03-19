@@ -1,10 +1,10 @@
 # Propuesta de Arquitectura: Plataforma de Anonimizacion de Ticketing
 
-**Version:** 1.7
+**Version:** 1.8
 **Fecha original:** 13 de Marzo de 2026
-**Ultima actualizacion:** 18 de Marzo de 2026
+**Ultima actualizacion:** 19 de Marzo de 2026
 **Equipo:** NTT DATA EMEAL
-**Estado:** Piloto implementado con Presidio NLP configurable desde UI, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional (integraciones + anonimizacion + admin tickets), renderizado Markdown en chat, notificaciones toast/modal, soporte tri-provider LLM (Ollama/OpenAI/Azure), test de conexion LLM desde UI, guia de despliegue Azure completa, 56 tests, **arquitectura dual-agent** (LLM anonimizacion + LLM resolucion), **filtros de origen con JQL dinamico**, **buscador en pendientes**, **eliminacion de datos PII de BBDD** (mapa sustitucion reconstruido on-the-fly) — pendiente validacion (Fase 4)
+**Estado:** Piloto implementado con Presidio NLP configurable desde UI, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional (integraciones + anonimizacion + admin tickets), renderizado Markdown en chat, notificaciones toast/modal, soporte tri-provider LLM (Ollama/OpenAI/Azure), test de conexion LLM desde UI, guia de despliegue Azure completa, 56 tests, **arquitectura dual-agent** (LLM anonimizacion + LLM resolucion), **filtros de origen con JQL dinamico**, **buscador en pendientes**, **eliminacion de datos PII de BBDD** (mapa sustitucion reconstruido on-the-fly), **LLM detector adaptativo** (modo full/names-only segun detectores activos), **reconstruccion de mapa inmutable** (siempre usa CompositeDetector), **proteccion anti-re-tokenizacion** (tokens existentes no se re-procesan) — pendiente validacion (Fase 4)
 
 ---
 
@@ -524,8 +524,9 @@ Si hay tool_calls → ejecutar tools → re-invocar LLM con resultados
        │
        ▼
 POST: Anonymizer.filter_output() escanea respuesta
-  1. Sustitucion de valores conocidos del mapa
+  1. Sustitucion de valores conocidos del mapa (reconstruido con CompositeDetector inmutable)
   2. Regex fresco para PII desconocido → [TYPE_REDACTED]
+  3. AnonymizationLLM.filter_text() (si activo) — con proteccion anti-re-tokenizacion
        │
        ▼
 Guardar en chat_history + audit_log
@@ -577,9 +578,11 @@ intercambiables. `Anonymizer` acepta un detector inyectable. El detector por def
 │           └────────────────────┘                      │
 │                                                      │
 │  ┌────────────────────┐  ┌────────────────────┐      │
-│  │ AttachmentDetector │  │ AXETDetector       │      │
-│  │ (delega a Regex)   │  │ (futuro)           │      │
-│  └────────────────────┘  └────────────────────┘      │
+│  │ AttachmentDetector │  │ LLM Detector       │      │
+│  │ (delega a Regex)   │  │ (llm_detector.py)  │      │
+│  └────────────────────┘  │ Modo adaptativo:   │      │
+│                           │ full / names_only  │      │
+│                           └────────────────────┘      │
 └──────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────┐
@@ -587,12 +590,30 @@ intercambiables. `Anonymizer` acepta un detector inyectable. El detector por def
 │                                                      │
 │  __init__(detector=CompositeDetector())              │
 │  detect_pii(text) → delega a detector                │
-│  anonymize(text) → (anon_text, map)                  │
+│  anonymize(text, extra_entities) → (anon_text, map)  │
 │  filter_output(text, sub_map) → clean_text           │
 │  de_anonymize(text, sub_map) → real_text             │
+│  reconstruct_map(text) → sub_map (determinista)      │
 │                                                      │
-│  Metodos estaticos de cifrado:                       │
-│  generate_key() / encrypt_map / decrypt_map          │
+│  Metodos estaticos:                                  │
+│  compute_text_hash / assemble_ingest_text            │
+└──────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────┐
+│   LLM Detector adaptativo (llm_detector.py) — v1.8  │
+│                                                      │
+│  llm_detect_pii(text, already, llm, detectors_active)│
+│                                                      │
+│  Dos modos segun estado de detectores:               │
+│  • names_only: regex/Presidio activos → solo busca   │
+│    nombres de persona (su punto debil)               │
+│  • full: detectores desactivados → busca TODOS los   │
+│    tipos PII (PERSONA, EMAIL, TELEFONO, DNI, IBAN,   │
+│    DIRECCION, UBICACION, ORGANIZACION, MATRICULA,    │
+│    TARJETA_CREDITO)                                  │
+│                                                      │
+│  El modo full convierte al LLM en el detector        │
+│  PRIMARIO cuando no hay barreras automaticas.        │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -651,9 +672,10 @@ Ticket PESESG-123:
 **Nota:** Los tipos `SISTEMA` y `UBICACION` mostrados en la propuesta v1.0 no se detectan
 automaticamente. No existe regex para direcciones ni para nombres de servidores.
 
-**Reglas de seguridad (implementadas — v1.7 sin persistencia):**
+**Reglas de seguridad (implementadas — v1.8 sin persistencia):**
 - **Ya NO se almacena** el mapa de sustitucion en la BBDD (tabla `substitution_map` eliminada)
 - El mapa se **reconstruye on-the-fly** re-leyendo el ticket origen y re-ejecutando `anonymize()` (determinista)
+- **v1.8: Reconstruccion inmutable** — `_get_substitution_map` siempre usa un `CompositeDetector` temporal (Presidio + Regex) para reconstruir, independientemente del detector activo en ese momento. Esto garantiza que el mapa coincide con la ingesta original incluso si el usuario desactiva detectores posteriormente
 - Cache LRU en memoria (max 50 tickets) para evitar llamadas repetidas al origen durante una sesion de chat
 - Hash SHA-256 del texto original almacenado en `ticket_mapping.source_text_hash` para detectar cambios en el origen
 - Solo accesible por el servicio backend, nunca expuesto al frontend
@@ -884,6 +906,9 @@ CREATE TABLE system_config (
 | Accion tecnica no segura | Media | Allowlist + auditoria. Acciones simuladas en piloto | ✅ (simulado) |
 | Caso ambiguo no anonimizable | Media | Escalado a onshore | ⚠️ No implementado |
 | read_ticket devuelve PII al LLM | Baja | System prompt + post-filter. Pre-filter no aplicado en este path | ⚠️ Riesgo aceptado |
+| Cambio de detector post-ingesta rompe mapa | Eliminado | Reconstruccion inmutable con CompositeDetector (v1.8) | ✅ |
+| Tokens existentes re-procesados como PII | Eliminado | Proteccion anti-re-tokenizacion en AnonymizationLLM (v1.8) | ✅ |
+| Detectores desactivados sin LLM de respaldo | Media | LLM detector modo full detecta todos los tipos PII (v1.8) | ✅ |
 
 **Nota sobre `read_ticket`:** La tool `read_ticket` devuelve el contenido completo del ticket
 (con PII) directamente al LLM para que pueda razonar sobre el contexto. El system prompt
@@ -1278,6 +1303,9 @@ KOSIN como repositorio interno anonimizado, y un catalogo cerrado de acciones te
 - **Filtros de origen con JQL dinamico** (v1.7): filtros por fecha, prioridad, estado, tipo y max resultados. Presets rapidos (ultima semana/mes). Panel colapsable en frontend
 - **Buscador en incidencias pendientes** (v1.7): busqueda client-side por clave, tipo, estado, prioridad y sistema origen con contador de resultados
 - **Eliminacion de datos PII de BBDD** (v1.7): tabla `substitution_map` eliminada. Mapa reconstruido on-the-fly desde sistema origen (determinista). Cache LRU en memoria. Hash SHA-256 para detectar cambios en origen. Cifrado AES-256-GCM eliminado
+- **LLM detector adaptativo** (v1.8): `llm_detect_pii` opera en dos modos — `names_only` cuando regex/Presidio estan activos (busca solo nombres) y `full` cuando estan desactivados (busca TODOS los tipos de PII: personas, emails, telefonos, DNI, IBAN, direcciones, etc.). Esto permite al LLM actuar como detector primario cuando no hay barreras automaticas
+- **Reconstruccion de mapa inmutable** (v1.8): `_get_substitution_map` siempre usa un `CompositeDetector` temporal para reconstruir el mapa de sustitucion, independientemente del detector activo. Esto soluciona el bug donde cambiar el detector despues de ingestar producia mapas vacios y tokens `[TIPO_REDACTED]` en el chat
+- **Proteccion anti-re-tokenizacion** (v1.8): el `AnonymizationLLM.filter_text()` ahora detecta y omite tokens de anonimizacion existentes (formato `[TIPO_N]` o `[TIPO_REDACTED]`) para evitar que se re-procesen como PII. Prompt del agente de anonimizacion mejorado con lista ampliada de falsos positivos (terminologia SAP, frases genericas de procedimiento, terminos ITSM)
 
 **Principales elementos pendientes:**
 - Autenticacion de operadores (JWT/SSO)

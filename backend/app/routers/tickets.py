@@ -262,7 +262,9 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
         try:
             from ..services.llm_detector import llm_detect_pii
             already = anonymizer.detect_pii(full_text)
-            llm_entities = await llm_detect_pii(full_text, already, agent.llm)
+            # Tell LLM if regex/presidio are active so it knows whether to do full detection
+            detectors_active = has_regex or has_presidio
+            llm_entities = await llm_detect_pii(full_text, already, agent.llm, detectors_active=detectors_active)
             det_state["agente"] = {"status": "completed", "count": len(llm_entities)}
         except Exception as e:
             logger.warning("llm_detector_failed", error=str(e))
