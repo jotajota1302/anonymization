@@ -178,15 +178,18 @@ export default function Home() {
           if (data.pii_warning) {
             setPiiWarning(data.ticket_id, data.pii_warning);
           }
+          // Let the user see the completed stepper for a moment
+          await new Promise((r) => setTimeout(r, 2500));
           await Promise.all([fetchBoardTickets(), fetchTickets()]);
+          setIsIngesting(false);
           handleSelectTicket(data.ticket_id);
         } else {
           const err = await res.json();
           showToast(`Error al ingestar: ${err.detail || "Error desconocido"}`);
+          setIsIngesting(false);
         }
       } catch (err) {
         showToast("Error de red al ingestar el ticket");
-      } finally {
         setIsIngesting(false);
       }
     },

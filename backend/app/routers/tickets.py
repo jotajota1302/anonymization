@@ -90,12 +90,20 @@ async def list_board_tickets(
     from ..config import settings as cfg
     parent_key = cfg.kosin_parent_key
 
+    # Known prefixes from connector router — only show tickets from registered projects
+    known_prefixes = tuple(connector_router._prefixes.keys()) if connector_router and connector_router._prefixes else ()
+    logger.info("board_filter", known_prefixes=known_prefixes, total_issues=len(issues))
+
     board_tickets = []
     for issue in issues:
         key = issue.get("key", "")
         fields = issue.get("fields", {})
         summary = fields.get("summary", "")
         source_system = issue.get("source_system", "unknown")
+
+        # Filter out tickets from unknown projects (e.g. GDNESPAIN-74)
+        if known_prefixes and not key.startswith(known_prefixes):
+            continue
 
         # Filter out [ANON] tickets and VOLCADO parent
         if "[ANON]" in summary:
@@ -228,6 +236,11 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
         det_state["regex"] = {"status": "pending", "count": None}
     if has_presidio:
         det_state["presidio"] = {"status": "pending", "count": None}
+    # LLM agent detector — only if LLM is configured
+    agent = state.get("agent")
+    has_llm = agent is not None and hasattr(agent, "llm")
+    if has_llm:
+        det_state["agente"] = {"status": "pending", "count": None}
     det_state["anonymize"] = {"status": "pending", "count": None}
 
     await _progress("detecting_pii", 1, detectors=det_state)
@@ -241,8 +254,23 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
         det_state["presidio"] = {"status": "completed", "count": breakdown["presidio"]}
         await _progress("detecting_pii", 1, detectors=det_state)
 
-    # Run actual anonymization
-    anonymized_text, sub_map = anonymizer.anonymize(full_text)
+    # LLM agent pass — review what regex/presidio found and catch missed PII
+    llm_entities = []
+    if has_llm:
+        det_state["agente"] = {"status": "in_progress", "count": None}
+        await _progress("detecting_pii", 1, detectors=det_state)
+        try:
+            from ..services.llm_detector import llm_detect_pii
+            already = anonymizer.detect_pii(full_text)
+            llm_entities = await llm_detect_pii(full_text, already, agent.llm)
+            det_state["agente"] = {"status": "completed", "count": len(llm_entities)}
+        except Exception as e:
+            logger.warning("llm_detector_failed", error=str(e))
+            det_state["agente"] = {"status": "completed", "count": 0}
+        await _progress("detecting_pii", 1, detectors=det_state)
+
+    # Run actual anonymization (merging LLM extra entities)
+    anonymized_text, sub_map = anonymizer.anonymize(full_text, extra_entities=llm_entities or None)
     det_state["anonymize"] = {"status": "completed", "count": len(sub_map)}
     await _progress("detecting_pii", 1, status="completed", detectors=det_state)
 
@@ -310,10 +338,17 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
             detail=f"Error guardando en DB (ticket {kosin_id} eliminado como rollback): {str(e)}",
         )
 
-    await _progress("creating_destination", 2, status="completed")
+    await _progress("creating_destination", 2, status="completed",
+                    detail=kosin_id)
 
     # --- Step 3: Completed ---
-    await _progress("completed", 3, status="completed", detectors=det_state)
+    pii_total = len(sub_map)
+    completed_detail = (
+        f"{kosin_id} — {pii_total} entidades PII anonimizadas"
+        if pii_total else f"{kosin_id} — Sin PII detectado"
+    )
+    await _progress("completed", 3, status="completed",
+                    detail=completed_detail, detectors=det_state)
 
     # Audit log
     await db.add_audit_log(

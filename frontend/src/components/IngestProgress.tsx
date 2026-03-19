@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useAppStore } from "@/stores/appStore";
 import { IngestStep, DetectorResult } from "@/types";
 
@@ -13,6 +14,7 @@ const STEPS = [
 const DETECTOR_LABELS: Record<string, string> = {
   regex: "Regex",
   presidio: "Presidio NLP",
+  agente: "Agente IA",
   anonymize: "Anonimizar",
 };
 
@@ -127,6 +129,22 @@ function StepIndicator({ status, index }: { status: "pending" | "in_progress" | 
 export function IngestProgress() {
   const ingestProgress = useAppStore((s) => s.ingestProgress);
 
+  // Accumulate per-step data across WS messages so completed steps keep their info
+  const stepDataRef = useRef<Record<string, { detail?: string; detectors?: Record<string, DetectorResult> }>>({});
+
+  useEffect(() => {
+    if (!ingestProgress) {
+      stepDataRef.current = {};
+      return;
+    }
+    const key = ingestProgress.step;
+    const prev = stepDataRef.current[key] || {};
+    stepDataRef.current[key] = {
+      detail: ingestProgress.detail ?? prev.detail,
+      detectors: ingestProgress.detectors ?? prev.detectors,
+    };
+  }, [ingestProgress]);
+
   // Determine each step's visual status based on current progress
   const getStepStatus = (stepIndex: number): "pending" | "in_progress" | "completed" | "error" => {
     if (!ingestProgress) return stepIndex === 0 ? "in_progress" : "pending";
@@ -142,13 +160,16 @@ export function IngestProgress() {
     return "pending";
   };
 
+  const stepData = stepDataRef.current;
+
   return (
     <div className="w-full max-w-md" role="status" aria-label="Progreso de ingesta">
       <div className="space-y-0">
         {STEPS.map((step, idx) => {
           const status = getStepStatus(idx);
           const isLast = idx === STEPS.length - 1;
-          const showDetectors = step.key === "detecting_pii" && ingestProgress?.detectors;
+          const data = stepData[step.key];
+          const showDetectors = step.key === "detecting_pii" && data?.detectors;
 
           return (
             <div key={step.key} className="flex gap-3">
@@ -173,13 +194,17 @@ export function IngestProgress() {
                   {step.label}
                 </span>
 
-                {status === "error" && ingestProgress?.detail && (
-                  <p className="text-xs text-red-500 dark:text-red-400 mt-1">{ingestProgress.detail}</p>
+                {status === "error" && data?.detail && (
+                  <p className="text-xs text-red-500 dark:text-red-400 mt-1">{data.detail}</p>
+                )}
+
+                {status === "completed" && data?.detail && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400/80 mt-0.5 font-mono">{data.detail}</p>
                 )}
 
                 {showDetectors && (
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    {Object.entries(ingestProgress!.detectors!).map(([dk, det]) => (
+                    {Object.entries(data!.detectors!).map(([dk, det]) => (
                       <DetectorBadge key={dk} name={dk} result={det} />
                     ))}
                   </div>

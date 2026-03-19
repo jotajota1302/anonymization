@@ -4,7 +4,7 @@ import re
 from abc import ABC, abstractmethod
 from typing import List
 
-from .anonymizer import PiiEntity, SPANISH_NAMES
+from .anonymizer import PiiEntity
 
 
 class DetectionService(ABC):
@@ -57,10 +57,12 @@ class RegexDetector(DetectionService):
         ),
     }
 
-    NAME_PATTERN = re.compile(r'\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b')
-
     def detect(self, text: str) -> List[PiiEntity]:
-        """Detect PII entities in text using regex patterns."""
+        """Detect PII entities in text using regex patterns.
+
+        Only detects structured/formatted PII (DNI, email, phone, IBAN, etc.).
+        Name detection is delegated to Presidio NLP + LLM detector.
+        """
         entities = []
 
         for entity_type, pattern in self.PATTERNS.items():
@@ -72,57 +74,10 @@ class RegexDetector(DetectionService):
                     end=match.end(),
                 ))
 
-        name_candidates = []
-        for match in self.NAME_PATTERN.finditer(text):
-            word = match.group()
-            if word.lower() in SPANISH_NAMES:
-                name_candidates.append(PiiEntity(
-                    text=word,
-                    entity_type="PERSONA",
-                    start=match.start(),
-                    end=match.end(),
-                ))
-
-        entities.extend(self._merge_name_candidates(name_candidates, text))
-
         entities.sort(key=lambda e: e.start)
         entities = self._remove_overlaps(entities)
 
         return entities
-
-    def _merge_name_candidates(
-        self, candidates: List[PiiEntity], text: str
-    ) -> List[PiiEntity]:
-        """Merge consecutive name candidates into full names."""
-        if not candidates:
-            return []
-
-        merged = []
-        i = 0
-        while i < len(candidates):
-            current = candidates[i]
-            full_name = current.text
-            end = current.end
-
-            j = i + 1
-            while j < len(candidates):
-                between = text[end:candidates[j].start]
-                if between.strip() == "" and len(between) <= 2:
-                    full_name += between + candidates[j].text
-                    end = candidates[j].end
-                    j += 1
-                else:
-                    break
-
-            merged.append(PiiEntity(
-                text=full_name,
-                entity_type="PERSONA",
-                start=current.start,
-                end=end,
-            ))
-            i = j
-
-        return merged
 
     def _remove_overlaps(self, entities: List[PiiEntity]) -> List[PiiEntity]:
         """Remove overlapping entities, keeping the longer one."""
@@ -276,6 +231,10 @@ class PresidioDetector(DetectionService):
         """Filter out obvious false positives from Presidio NER."""
         stripped = entity_text.strip()
         text_lower = stripped.lower()
+
+        # Multiline entities are always garbage (e.g. "FRANCISCO\n36984065L ####")
+        if '\n' in entity_text or '\r' in entity_text:
+            return True
 
         # User-configured excluded words
         if text_lower in self._extra_excluded_words:

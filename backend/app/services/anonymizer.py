@@ -19,17 +19,6 @@ class PiiEntity:
 
 
 # Common Spanish first names for heuristic name detection
-SPANISH_NAMES = {
-    "juan", "maria", "jose", "ana", "carlos", "laura", "antonio", "carmen",
-    "francisco", "isabel", "pedro", "lucia", "miguel", "elena", "javier",
-    "marta", "rafael", "rosa", "fernando", "pilar", "david", "teresa",
-    "alejandro", "cristina", "jorge", "patricia", "alberto", "beatriz",
-    "daniel", "andrea", "pablo", "sandra", "sergio", "raquel", "manuel",
-    "monica", "ramon", "sara", "luis", "paula", "angel", "silvia",
-    "gonzalez", "garcia", "martinez", "lopez", "hernandez", "rodriguez",
-    "fernandez", "sanchez", "perez", "martin", "gomez", "ruiz", "diaz",
-    "moreno", "alvarez", "romero", "torres", "navarro", "dominguez", "vazquez",
-}
 
 
 class Anonymizer:
@@ -45,15 +34,41 @@ class Anonymizer:
         """Detect PII entities in text using the configured DetectionService."""
         return self._detector.detect(text)
 
-    def anonymize(self, text: str) -> Tuple[str, Dict[str, str]]:
+    def anonymize(self, text: str, extra_entities: List[PiiEntity] = None) -> Tuple[str, Dict[str, str]]:
         """
         Anonymize text by replacing PII with tokens.
+
+        Args:
+            text: Text to anonymize.
+            extra_entities: Additional PII entities (e.g. from LLM detector)
+                to merge with the detector results.
 
         Returns:
             Tuple of (anonymized_text, substitution_map)
             where substitution_map maps token -> original_value
         """
         entities = self.detect_pii(text)
+
+        if extra_entities:
+            # Mark extra entities (from LLM) so they win ties during merge
+            extra_set = set(id(e) for e in extra_entities)
+            entities.extend(extra_entities)
+            entities.sort(key=lambda e: e.start)
+            # Remove overlaps: prefer longer entity; on equal length prefer LLM (extra)
+            if len(entities) > 1:
+                merged = [entities[0]]
+                for e in entities[1:]:
+                    if e.start >= merged[-1].end:
+                        merged.append(e)
+                    else:
+                        cur_len = len(e.text)
+                        prev_len = len(merged[-1].text)
+                        if cur_len > prev_len:
+                            merged[-1] = e
+                        elif cur_len == prev_len and id(e) in extra_set:
+                            # Same span, LLM reclassification wins
+                            merged[-1] = e
+                entities = merged
 
         if not entities:
             return text, {}

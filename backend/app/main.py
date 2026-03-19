@@ -28,20 +28,44 @@ logger = structlog.get_logger()
 app_state: dict = {}
 
 
-def _init_detector():
-    """Initialize the PII detector based on config."""
-    detector_type = settings.pii_detector.lower()
+async def _init_detector(db):
+    """Initialize the PII detector from DB config (or env fallback)."""
+    # Try to read saved config from DB
+    anon_config = None
+    try:
+        row = await db.get_system_config("anonymization")
+        if row and row.get("extra_config"):
+            raw = row["extra_config"]
+            if isinstance(raw, str):
+                anon_config = json.loads(raw)
+            elif isinstance(raw, dict):
+                anon_config = raw
+    except Exception:
+        pass
+
+    if anon_config:
+        detector_type = anon_config.get("detector_type", settings.pii_detector).lower()
+        presidio_cfg = {
+            "score_threshold": anon_config.get("presidio_sensitivity", 65),
+            "enabled_entities": anon_config.get("presidio_entities"),
+            "excluded_words": anon_config.get("presidio_excluded_words"),
+            "min_lengths": anon_config.get("presidio_min_lengths"),
+            "model_name": anon_config.get("presidio_model", "es_core_news_lg"),
+        }
+    else:
+        detector_type = settings.pii_detector.lower()
+        presidio_cfg = {}
 
     if detector_type == "regex":
         from .services.detection import RegexDetector
-        logger.info("pii_detector_initialized", type="regex")
+        logger.info("pii_detector_initialized", type="regex", source="db" if anon_config else "env")
         return RegexDetector()
 
     if detector_type == "presidio":
         try:
             from .services.detection import PresidioDetector
-            logger.info("pii_detector_initialized", type="presidio")
-            return PresidioDetector()
+            logger.info("pii_detector_initialized", type="presidio", source="db" if anon_config else "env")
+            return PresidioDetector(**presidio_cfg)
         except Exception as e:
             logger.warning("presidio_not_available", error=str(e), fallback="regex")
             from .services.detection import RegexDetector
@@ -50,8 +74,8 @@ def _init_detector():
     # Default: composite
     try:
         from .services.detection import CompositeDetector
-        detector = CompositeDetector()
-        logger.info("pii_detector_initialized", type="composite")
+        detector = CompositeDetector(presidio_config=presidio_cfg)
+        logger.info("pii_detector_initialized", type="composite", source="db" if anon_config else "env")
         return detector
     except Exception as e:
         logger.warning("composite_detector_failed", error=str(e), fallback="regex")
@@ -120,7 +144,7 @@ async def reload_connectors(db=None):
 
             if system_type == "destination":
                 destination_connector = connector
-            if project_key:
+            if project_key and system_type != "destination":
                 router.register(name, connector, [f"{project_key}-"])
 
             logger.info("connector_loaded", system=name, type=cfg.get("connector_type"),
@@ -174,58 +198,7 @@ async def _seed_default_configs(db):
             "is_mock": 0,
             "polling_interval_sec": 60,
         },
-        {
-            "system_name": "remedy",
-            "display_name": "Remedy",
-            "system_type": "source",
-            "connector_type": "remedy",
-            "base_url": "",
-            "auth_token": "",
-            "auth_email": "",
-            "project_key": "",
-            "extra_config": "{}",
-            "is_active": int("remedy" in settings.active_sources),
-            "is_mock": 0,
-            "polling_interval_sec": 60,
-        },
-        {
-            "system_name": "servicenow",
-            "display_name": "ServiceNow",
-            "system_type": "source",
-            "connector_type": "servicenow",
-            "base_url": "",
-            "auth_token": "",
-            "auth_email": "",
-            "project_key": "",
-            "extra_config": "{}",
-            "is_active": int("servicenow" in settings.active_sources),
-            "is_mock": 0,
-            "polling_interval_sec": 60,
-        },
     ]
-    # Migrate legacy "kosin" entry → "gdnespain"
-    legacy = await db.get_system_config("kosin")
-    if legacy:
-        gdne = await db.get_system_config("gdnespain")
-        if not gdne:
-            # Copy config to new name
-            await db.upsert_system_config(
-                "gdnespain",
-                display_name=legacy.get("display_name", "GDNESPAIN (Destino)"),
-                system_type="destination",
-                connector_type=legacy.get("connector_type", "jira"),
-                base_url=legacy.get("base_url", ""),
-                auth_token=legacy.get("auth_token", ""),
-                auth_email=legacy.get("auth_email", ""),
-                project_key=legacy.get("project_key", settings.kosin_project),
-                extra_config=legacy.get("extra_config", "{}") if isinstance(legacy.get("extra_config"), str) else json.dumps(legacy.get("extra_config", {})),
-                is_active=legacy.get("is_active", 1),
-                is_mock=legacy.get("is_mock", 0),
-                polling_interval_sec=legacy.get("polling_interval_sec", 60),
-            )
-        await db.delete_system_config("kosin")
-        logger.info("migrated_kosin_to_gdnespain")
-
     active_list = [s.strip().lower() for s in settings.active_sources.split(",") if s.strip()]
     for cfg in defaults:
         name = cfg.pop("system_name")
@@ -252,8 +225,8 @@ async def lifespan(app: FastAPI):
     await _seed_default_configs(db)
     app_state["db"] = db
 
-    # PII Detector
-    detector = _init_detector()
+    # PII Detector (reads saved config from DB)
+    detector = await _init_detector(db)
     app_state["detector"] = detector
 
     # Anonymizer
