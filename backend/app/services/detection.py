@@ -157,11 +157,26 @@ class PresidioDetector(DetectionService):
         "URL": "URL",
     }
 
-    # Minimum text length per entity type to reduce false positives
-    MIN_LENGTH = {
+    # Default minimum text length per entity type to reduce false positives
+    DEFAULT_MIN_LENGTHS = {
         "PERSONA": 4,
         "UBICACION": 5,
         "ORGANIZACION": 4,
+    }
+
+    # Default enabled entities (all mapped types)
+    DEFAULT_ENTITIES = {
+        "PERSONA": True,
+        "UBICACION": True,
+        "ORGANIZACION": True,
+        "EMAIL": True,
+        "TELEFONO": True,
+        "IBAN": True,
+        "IP": True,
+        "DNI": True,
+        "TARJETA_CREDITO": True,
+        "FECHA": False,
+        "URL": False,
     }
 
     # Patterns that look like technical codes, not PII
@@ -209,7 +224,14 @@ class PresidioDetector(DetectionService):
         re.IGNORECASE
     )
 
-    def __init__(self, model_name: str = "es_core_news_lg"):
+    def __init__(
+        self,
+        model_name: str = "es_core_news_lg",
+        score_threshold: float = 0.65,
+        enabled_entities: dict = None,
+        excluded_words: list = None,
+        min_lengths: dict = None,
+    ):
         from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
         from presidio_analyzer.nlp_engine import SpacyNlpEngine
 
@@ -221,6 +243,10 @@ class PresidioDetector(DetectionService):
             supported_languages=["es"],
         )
         self._model_name = model_name
+        self._score_threshold = score_threshold
+        self._enabled_entities = {**self.DEFAULT_ENTITIES, **(enabled_entities or {})}
+        self._extra_excluded_words = set(w.lower() for w in (excluded_words or []))
+        self._min_lengths = {**self.DEFAULT_MIN_LENGTHS, **(min_lengths or {})}
 
         # Custom recognizer for Spanish DNI/NIF/NIE/CIF
         spanish_id_recognizer = PatternRecognizer(
@@ -251,9 +277,14 @@ class PresidioDetector(DetectionService):
         stripped = entity_text.strip()
         text_lower = stripped.lower()
 
+        # User-configured excluded words
+        if text_lower in self._extra_excluded_words:
+            return True
+
         # Common words that are never PII (check each word in the entity)
+        all_excluded = self._FALSE_POSITIVE_WORDS | self._extra_excluded_words
         words = re.split(r'[\s()\[\],;:\-/]+', text_lower)
-        if all(w in self._FALSE_POSITIVE_WORDS or not w for w in words):
+        if all(w in all_excluded or not w for w in words):
             return True
 
         # Field label patterns: "Nombre(Dirección)", "Nombre 1", etc.
@@ -271,8 +302,8 @@ class PresidioDetector(DetectionService):
         if entity_type in ("ORGANIZACION", "UBICACION", "PERSONA") and len(stripped) > 40:
             return True
 
-        # Too short for NER-based types (PERSONA, UBICACION, ORGANIZACION)
-        min_len = self.MIN_LENGTH.get(entity_type, 0)
+        # Too short for NER-based types — uses configurable min_lengths
+        min_len = self._min_lengths.get(entity_type, 0)
         if min_len and len(stripped) < min_len:
             return True
 
@@ -283,13 +314,17 @@ class PresidioDetector(DetectionService):
         results = self._analyzer.analyze(
             text=text,
             language="es",
-            score_threshold=0.65,
+            score_threshold=self._score_threshold / 100.0 if self._score_threshold > 1 else self._score_threshold,
         )
 
         entities = []
         for result in results:
             entity_type = self.TYPE_MAP.get(result.entity_type, result.entity_type)
             entity_text = text[result.start:result.end]
+
+            # Skip disabled entity types
+            if not self._enabled_entities.get(entity_type, True):
+                continue
 
             if self._is_false_positive(entity_text, entity_type):
                 continue
@@ -312,13 +347,14 @@ class CompositeDetector(DetectionService):
     Prefers longer entities when overlaps occur.
     """
 
-    def __init__(self, detectors: List[DetectionService] = None):
+    def __init__(self, detectors: List[DetectionService] = None, presidio_config: dict = None):
         if detectors is not None:
             self._detectors = detectors
         else:
             # Default: try Presidio + Regex, fallback to Regex only
             try:
-                self._detectors = [PresidioDetector(), RegexDetector()]
+                kwargs = presidio_config or {}
+                self._detectors = [PresidioDetector(**kwargs), RegexDetector()]
             except Exception:
                 import structlog
                 structlog.get_logger().warning(

@@ -71,14 +71,17 @@ async def list_board_tickets(
     db = state["db"]
     connector_router = state.get("connector_router")
 
-    # Get board issues from all sources via router, or fallback to KOSIN only
+    # Get board issues from all sources via router
     if connector_router:
         issues = await connector_router.get_all_board_issues(filters=filters)
     else:
-        kosin = state["kosin_connector"]
-        issues = await kosin.get_board_issues(filters=filters)
-        for issue in issues:
-            issue["source_system"] = "kosin"
+        dest = state.get("destination_connector")
+        if dest:
+            issues = await dest.get_board_issues(filters=filters)
+            for issue in issues:
+                issue["source_system"] = "destination"
+        else:
+            issues = []
 
     # Get already-ingested keys from DB
     ingested_keys = await db.get_ingested_ticket_keys()
@@ -92,7 +95,7 @@ async def list_board_tickets(
         key = issue.get("key", "")
         fields = issue.get("fields", {})
         summary = fields.get("summary", "")
-        source_system = issue.get("source_system", "kosin")
+        source_system = issue.get("source_system", "unknown")
 
         # Filter out [ANON] tickets and VOLCADO parent
         if "[ANON]" in summary:
@@ -119,24 +122,43 @@ async def list_board_tickets(
 
 
 @router.post("/ingest-confirm/{kosin_key}", response_model=IngestConfirmResponse)
-async def ingest_confirm(kosin_key: str):
+async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None)):
     """Operator confirms they want to attend this ticket.
 
-    1. Reads full ticket from KOSIN (with PII)
-    2. Reads comments from KOSIN
-    3. Anonymizes everything together
-    4. Creates VOLCADO sub-task in KOSIN with anonymized data
-    5. Saves mapping + encrypted substitution map in DB
-    6. Returns local ticket_id for chat
+    1. Reads full ticket + comments from source (with PII)
+    2. Detects PII with breakdown (regex, presidio, composite)
+    3. Anonymizes and creates VOLCADO sub-task in destination
+    4. Saves mapping in DB
+    5. Returns local ticket_id for chat
+
+    Sends real-time progress via WebSocket if client_id is provided.
     """
     state = _get_state()
     db = state["db"]
     anonymizer = state["anonymizer"]
-    kosin = state["kosin_connector"]
+    destination = state.get("destination_connector")
+    ws_manager = state.get("ws_manager")
+
+    TOTAL_STEPS = 4  # reading_source, detecting_pii, creating_destination, completed
+
+    async def _progress(step: str, step_index: int, status: str = "in_progress",
+                        detail: str = None, detectors: dict = None):
+        if not (client_id and ws_manager and ws_manager.is_connected(client_id)):
+            return
+        payload = {
+            "step": step, "step_index": step_index,
+            "total_steps": TOTAL_STEPS, "status": status,
+            "source_key": kosin_key,
+        }
+        if detail is not None:
+            payload["detail"] = detail
+        if detectors is not None:
+            payload["detectors"] = detectors
+        await ws_manager.send_message(client_id, {"type": "ingest_progress", "data": payload})
 
     # Resolve source connector via router
     connector_router = state.get("connector_router")
-    source_system_name = "kosin"
+    source_system_name = "unknown"
     if connector_router:
         try:
             source_system_name, source_connector = connector_router.get_connector(kosin_key)
@@ -155,40 +177,74 @@ async def ingest_confirm(kosin_key: str):
             pii_entities_found=0,
         )
 
-    # Check if [ANON] ticket already exists in KOSIN (DB was cleaned but KOSIN wasn't)
-    existing_kosin = await kosin.find_anon_ticket(kosin_key)
-    if existing_kosin:
-        logger.warning(
-            "kosin_anon_exists_no_db",
-            source_key=kosin_key,
-            existing_kosin=existing_kosin,
-        )
-        raise HTTPException(
-            status_code=409,
-            detail=f"Ya existe un ticket anonimizado en KOSIN ({existing_kosin}) para {kosin_key}. "
-                   f"Elimínalo desde Configuración antes de re-ingestar.",
-        )
+    # Check if [ANON] ticket already exists in destination (DB was cleaned but destination wasn't)
+    if destination:
+        existing_anon = await destination.find_anon_ticket(kosin_key)
+        if existing_anon:
+            logger.warning(
+                "anon_exists_no_db",
+                source_key=kosin_key,
+                existing_anon=existing_anon,
+            )
+            await _progress("reading_source", 0, status="error",
+                            detail=f"Ya existe ticket anonimizado ({existing_anon})")
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ya existe un ticket anonimizado ({existing_anon}) para {kosin_key}. "
+                       f"Eliminalo desde Configuracion antes de re-ingestar.",
+            )
 
-    # 1. Read full ticket from source system
+    # --- Step 0: Reading source ---
+    await _progress("reading_source", 0)
+
     try:
         source_ticket = await source_connector.get_ticket(kosin_key)
     except Exception as e:
+        await _progress("reading_source", 0, status="error", detail=str(e))
         raise HTTPException(status_code=404, detail=f"No se pudo leer {kosin_key}: {str(e)}")
 
     summary = source_ticket.get("summary", "")
     description = source_ticket.get("description", "") or ""
     priority = source_ticket.get("priority", "Medium")
 
-    # 2. Read comments
     try:
         comments = await source_connector.get_comments(kosin_key)
     except Exception:
         comments = []
 
-    # 3. Anonymize everything together (using shared assembly method)
+    await _progress("reading_source", 0, status="completed")
+
+    # --- Step 1: Detecting PII (with per-detector breakdown) ---
     full_text = anonymizer.assemble_ingest_text(summary, description, comments)
     source_text_hash = anonymizer.compute_text_hash(full_text)
+
+    # Build detector list dynamically based on what's configured
+    breakdown = anonymizer.detect_breakdown(full_text)
+    has_regex = breakdown.get("regex") is not None
+    has_presidio = breakdown.get("presidio") is not None
+
+    det_state: dict = {}
+    if has_regex:
+        det_state["regex"] = {"status": "pending", "count": None}
+    if has_presidio:
+        det_state["presidio"] = {"status": "pending", "count": None}
+    det_state["anonymize"] = {"status": "pending", "count": None}
+
+    await _progress("detecting_pii", 1, detectors=det_state)
+
+    # Report each active detector result
+    if has_regex:
+        det_state["regex"] = {"status": "completed", "count": breakdown["regex"]}
+        await _progress("detecting_pii", 1, detectors=det_state)
+
+    if has_presidio:
+        det_state["presidio"] = {"status": "completed", "count": breakdown["presidio"]}
+        await _progress("detecting_pii", 1, detectors=det_state)
+
+    # Run actual anonymization
     anonymized_text, sub_map = anonymizer.anonymize(full_text)
+    det_state["anonymize"] = {"status": "completed", "count": len(sub_map)}
+    await _progress("detecting_pii", 1, status="completed", detectors=det_state)
 
     # Split back
     parts = anonymized_text.split("\n", 1)
@@ -203,7 +259,9 @@ async def ingest_confirm(kosin_key: str):
         anon_description = anon_rest.strip()
         anon_comments_section = ""
 
-    # 4. Create VOLCADO sub-task in KOSIN
+    # --- Step 2: Creating anonymized copy in destination ---
+    await _progress("creating_destination", 2)
+
     from ..config import settings as cfg
     parent_key = cfg.kosin_parent_key
 
@@ -216,7 +274,12 @@ async def ingest_confirm(kosin_key: str):
     if len(full_summary) > 255:
         full_summary = full_summary[:252] + "..."
 
-    kosin_id, create_error = await kosin.create_ticket(
+    if not destination:
+        await _progress("creating_destination", 2, status="error",
+                        detail="No hay conector destino configurado")
+        raise HTTPException(status_code=503, detail="No hay conector destino configurado. Configura uno en Integraciones.")
+
+    kosin_id, create_error = await destination.create_ticket(
         summary=full_summary,
         description=volcado_description,
         priority=priority,
@@ -224,9 +287,10 @@ async def ingest_confirm(kosin_key: str):
     )
 
     if not kosin_id:
-        raise HTTPException(status_code=500, detail=f"Error creando ticket anonimizado en KOSIN: {create_error}")
+        await _progress("creating_destination", 2, status="error", detail=create_error)
+        raise HTTPException(status_code=500, detail=f"Error creando ticket anonimizado en destino: {create_error}")
 
-    # 5. Save to local DB (with rollback if it fails) — NO substitution map stored
+    # Save to local DB (with rollback if it fails)
     try:
         ticket_id = await db.create_ticket_mapping(
             source_system=source_system_name,
@@ -238,15 +302,20 @@ async def ingest_confirm(kosin_key: str):
             source_text_hash=source_text_hash,
         )
     except Exception as e:
-        # Rollback: delete the KOSIN ticket we just created
-        logger.error("db_save_failed_rolling_back", kosin_id=kosin_id, error=str(e))
-        await kosin.delete_ticket(kosin_id)
+        logger.error("db_save_failed_rolling_back", dest_id=kosin_id, error=str(e))
+        await destination.delete_ticket(kosin_id)
+        await _progress("creating_destination", 2, status="error", detail=str(e))
         raise HTTPException(
             status_code=500,
-            detail=f"Error guardando en DB (ticket KOSIN {kosin_id} eliminado como rollback): {str(e)}",
+            detail=f"Error guardando en DB (ticket {kosin_id} eliminado como rollback): {str(e)}",
         )
 
-    # 6. Audit log
+    await _progress("creating_destination", 2, status="completed")
+
+    # --- Step 3: Completed ---
+    await _progress("completed", 3, status="completed", detectors=det_state)
+
+    # Audit log
     await db.add_audit_log(
         operator_id="operator",
         action="ingest_confirmed",
@@ -408,12 +477,15 @@ async def sync_to_client(ticket_id: int, body: SyncToClientRequest):
     return {"message": f"Comentario sincronizado con {source_ticket_id}", "success": True}
 
 
-@router.post("/{ticket_id}/kosin-comment")
-async def add_kosin_comment(ticket_id: int, body: dict):
-    """Register an action as a comment in the KOSIN destination (VOLCADO) ticket."""
+@router.post("/{ticket_id}/destination-comment")
+async def add_destination_comment(ticket_id: int, body: dict):
+    """Register an action as a comment in the destination (VOLCADO) ticket."""
     state = _get_state()
     db = state["db"]
-    kosin = state["kosin_connector"]
+    destination = state.get("destination_connector")
+
+    if not destination:
+        raise HTTPException(status_code=503, detail="No hay conector destino configurado")
 
     ticket = await db.get_ticket(ticket_id)
     if not ticket:
@@ -423,21 +495,21 @@ async def add_kosin_comment(ticket_id: int, body: dict):
     if not action_text:
         raise HTTPException(status_code=400, detail="action is required")
 
-    kosin_key = ticket["kosin_ticket_id"]
+    dest_key = ticket["kosin_ticket_id"]
     comment = f"[ACCION OPERADOR] {action_text}"
 
-    success = await kosin.add_comment(kosin_key, comment)
+    success = await destination.add_comment(dest_key, comment)
 
     await db.add_audit_log(
         operator_id="operator",
-        action="kosin_comment",
+        action="destination_comment",
         ticket_mapping_id=ticket_id,
-        details=f"kosin={kosin_key}, action={action_text}, success={success}",
+        details=f"dest={dest_key}, action={action_text}, success={success}",
     )
 
-    logger.info("kosin_comment_added", ticket_id=ticket_id, kosin=kosin_key, action=action_text)
+    logger.info("destination_comment_added", ticket_id=ticket_id, dest=dest_key, action=action_text)
 
-    return {"message": f"Comentario registrado en {kosin_key}", "success": success}
+    return {"message": f"Comentario registrado en {dest_key}", "success": success}
 
 
 @router.get("/{ticket_id}/attachment/{attachment_index}/redacted")

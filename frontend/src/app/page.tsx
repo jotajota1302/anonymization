@@ -172,7 +172,7 @@ export default function Home() {
     async (key: string) => {
       setIsIngesting(true);
       try {
-        const res = await fetch(`${API_URL}/api/tickets/ingest-confirm/${key}`, { method: "POST" });
+        const res = await fetch(`${API_URL}/api/tickets/ingest-confirm/${key}?client_id=${encodeURIComponent(clientId)}`, { method: "POST" });
         if (res.ok) {
           const data = await res.json();
           if (data.pii_warning) {
@@ -190,7 +190,7 @@ export default function Home() {
         setIsIngesting(false);
       }
     },
-    [setIsIngesting, fetchBoardTickets, fetchTickets, handleSelectTicket]
+    [setIsIngesting, fetchBoardTickets, fetchTickets, handleSelectTicket, clientId, setPiiWarning, showToast]
   );
 
   const handleSendMessage = useCallback(
@@ -198,11 +198,11 @@ export default function Home() {
       if (selectedTicketId) {
         sendMessage(selectedTicketId, message);
         if (isChip) {
-          fetch(`${API_URL}/api/tickets/${selectedTicketId}/kosin-comment`, {
+          fetch(`${API_URL}/api/tickets/${selectedTicketId}/destination-comment`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: message }),
-          }).catch((err) => console.error("Failed to register action in KOSIN:", err));
+          }).catch((err) => console.error("Failed to register action in destination:", err));
         }
       }
     },

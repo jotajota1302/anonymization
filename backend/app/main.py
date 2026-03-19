@@ -104,11 +104,11 @@ async def reload_connectors(db=None):
     configs = await db.get_all_system_configs()
 
     # Build connectors from active integrations
-    kosin_connector = None
+    destination_connector = None
     for cfg in configs:
         name = cfg.get("system_name", "")
         # Skip internal config entries
-        if name in ("anonymization", "agent", "general"):
+        if name in ("anonymization", "agent", "general", "anon_llm"):
             continue
         if not cfg.get("is_active"):
             continue
@@ -119,35 +119,21 @@ async def reload_connectors(db=None):
             system_type = cfg.get("system_type", "source")
 
             if system_type == "destination":
-                kosin_connector = connector
-                if project_key:
-                    router.register(name, connector, [f"{project_key}-"])
-            else:
-                # Source connector
-                if project_key:
-                    router.register(name, connector, [f"{project_key}-"])
+                destination_connector = connector
+            if project_key:
+                router.register(name, connector, [f"{project_key}-"])
 
             logger.info("connector_loaded", system=name, type=cfg.get("connector_type"),
                         project=project_key, system_type=system_type)
         except Exception as e:
             logger.error("connector_load_failed", system=name, error=str(e))
 
-    # Fallback: if no destination connector was found, create from env
-    if kosin_connector is None:
-        kosin_connector = KosinConnector(
-            base_url=settings.kosin_url,
-            token=settings.kosin_token,
-            project=settings.kosin_project,
-            issue_type_id=settings.kosin_issue_type_id,
-        )
-        logger.info("kosin_connector_from_env", project=settings.kosin_project)
-
     app_state["connector_router"] = router
-    app_state["kosin_connector"] = kosin_connector
-    # Backward compat: jira_connector points to the first registered source
+    app_state["destination_connector"] = destination_connector
+    # jira_connector points to the first registered source
     first_source = router.systems[0] if router.systems else None
     app_state["jira_connector"] = (
-        router.get_connector_by_name(first_source) if first_source else kosin_connector
+        router.get_connector_by_name(first_source) if first_source else destination_connector
     )
 
     logger.info("connectors_reloaded", systems=router.systems)
@@ -157,7 +143,7 @@ async def _seed_default_configs(db):
     """Seed system_config with defaults from .env if not already present."""
     defaults = [
         {
-            "system_name": "kosin",
+            "system_name": "gdnespain",
             "display_name": "GDNESPAIN (Destino)",
             "system_type": "destination",
             "connector_type": "jira",
@@ -217,6 +203,29 @@ async def _seed_default_configs(db):
             "polling_interval_sec": 60,
         },
     ]
+    # Migrate legacy "kosin" entry → "gdnespain"
+    legacy = await db.get_system_config("kosin")
+    if legacy:
+        gdne = await db.get_system_config("gdnespain")
+        if not gdne:
+            # Copy config to new name
+            await db.upsert_system_config(
+                "gdnespain",
+                display_name=legacy.get("display_name", "GDNESPAIN (Destino)"),
+                system_type="destination",
+                connector_type=legacy.get("connector_type", "jira"),
+                base_url=legacy.get("base_url", ""),
+                auth_token=legacy.get("auth_token", ""),
+                auth_email=legacy.get("auth_email", ""),
+                project_key=legacy.get("project_key", settings.kosin_project),
+                extra_config=legacy.get("extra_config", "{}") if isinstance(legacy.get("extra_config"), str) else json.dumps(legacy.get("extra_config", {})),
+                is_active=legacy.get("is_active", 1),
+                is_mock=legacy.get("is_mock", 0),
+                polling_interval_sec=legacy.get("polling_interval_sec", 60),
+            )
+        await db.delete_system_config("kosin")
+        logger.info("migrated_kosin_to_gdnespain")
+
     active_list = [s.strip().lower() for s in settings.active_sources.split(",") if s.strip()]
     for cfg in defaults:
         name = cfg.pop("system_name")

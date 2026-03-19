@@ -121,6 +121,29 @@ class Anonymizer:
 
         return filtered
 
+    def detect_breakdown(self, text: str) -> Dict[str, Optional[int]]:
+        """Run detection returning per-detector entity counts.
+
+        Returns dict with keys 'regex', 'presidio', 'total'.
+        Value is None when a detector is not available.
+        """
+        from .detection import CompositeDetector, RegexDetector, PresidioDetector
+
+        result: Dict[str, Optional[int]] = {"regex": None, "presidio": None, "total": 0}
+
+        if isinstance(self._detector, CompositeDetector):
+            for det in self._detector._detectors:
+                if isinstance(det, RegexDetector):
+                    result["regex"] = len(det.detect(text))
+                elif isinstance(det, PresidioDetector):
+                    result["presidio"] = len(det.detect(text))
+        elif isinstance(self._detector, RegexDetector):
+            result["regex"] = len(self._detector.detect(text))
+
+        all_entities = self._detector.detect(text)
+        result["total"] = len(all_entities)
+        return result
+
     @staticmethod
     def de_anonymize(text: str, substitution_map: Dict[str, str]) -> str:
         """Reemplaza tokens de anonimización por sus valores reales originales."""

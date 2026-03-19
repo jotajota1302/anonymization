@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/stores/appStore";
 import { ChatMessage } from "./ChatMessage";
+import { IngestProgress } from "./IngestProgress";
 import { BoardTicket } from "@/types";
 
 // Reusable SVG icons
@@ -153,10 +154,8 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
         <div className="flex-1 flex items-center justify-center px-6 bg-slate-50/50 dark:bg-slate-900">
           <div className="max-w-lg text-center">
             {isIngesting ? (
-              <div role="status">
-                <div className="w-16 h-16 mx-auto mb-5 border-[3px] border-primary/20 border-t-primary rounded-full animate-spin" />
-                <p className="text-base font-bold text-slate-900 dark:text-slate-100 mb-2">Anonimizando incidencia...</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Leyendo datos, detectando PII y creando copia segura</p>
+              <div role="status" className="w-full flex justify-center">
+                <IngestProgress />
               </div>
             ) : (
               <div>

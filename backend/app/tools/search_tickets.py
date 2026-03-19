@@ -36,14 +36,14 @@ async def search_tickets(jql_query: str, max_results: int = 20) -> str:
                 except Exception as e:
                     all_issues.append({"_error": f"{system_name}: {str(e)}"})
 
-    # Fallback: also search in kosin_connector (destination) if no router results
+    # Fallback: also search in destination connector if no router results
     if not all_issues:
-        connector = app_state.get("kosin_connector")
+        connector = app_state.get("destination_connector")
         if connector and hasattr(connector, "search_issues"):
             try:
                 issues = await connector.search_issues(jql_query, max_results)
                 for issue in issues:
-                    issue["source_system"] = "kosin"
+                    issue["source_system"] = "destination"
                 all_issues.extend(issues)
             except Exception:
                 pass

@@ -14,7 +14,7 @@ async def add_worklog(ticket_id: str, time_spent: str, comment: str = "") -> str
     """
     from ..main import app_state
 
-    kosin = app_state["kosin_connector"]
+    kosin = app_state["destination_connector"]
 
     try:
         success = await kosin.add_worklog(ticket_id, time_spent, comment)
@@ -39,7 +39,7 @@ async def get_worklogs(ticket_id: str) -> str:
     """
     from ..main import app_state
 
-    kosin = app_state["kosin_connector"]
+    kosin = app_state["destination_connector"]
 
     try:
         worklogs = await kosin.get_worklogs(ticket_id)
@@ -77,7 +77,7 @@ async def delete_worklog(ticket_id: str, worklog_id: str) -> str:
     """
     from ..main import app_state
 
-    kosin = app_state["kosin_connector"]
+    kosin = app_state["destination_connector"]
 
     try:
         success = await kosin.delete_worklog(ticket_id, worklog_id)

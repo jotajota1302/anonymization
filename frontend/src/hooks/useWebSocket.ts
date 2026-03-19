@@ -21,6 +21,7 @@ export function useWebSocket(clientId: string) {
     addMessage,
     selectedTicketId,
     setSuggestedChips,
+    setIngestProgress,
   } = useAppStore();
 
   const connect = useCallback(() => {
@@ -96,6 +97,10 @@ export function useWebSocket(clientId: string) {
             clearStreaming();
             break;
 
+          case "ingest_progress":
+            setIngestProgress(msg.data);
+            break;
+
           case "info":
             // Info messages (e.g., tool execution status)
             break;
@@ -125,7 +130,7 @@ export function useWebSocket(clientId: string) {
     };
 
     wsRef.current = ws;
-  }, [clientId, setIsConnected, appendToken, clearStreaming, setIsStreaming, addMessage, setSuggestedChips]);
+  }, [clientId, setIsConnected, appendToken, clearStreaming, setIsStreaming, addMessage, setSuggestedChips, setIngestProgress]);
 
   const sendMessage = useCallback(
     (ticketId: number, message: string) => {

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { TicketSummary, ChatMessage, BoardTicket } from "@/types";
+import { TicketSummary, ChatMessage, BoardTicket, IngestStep } from "@/types";
 
 export interface BoardFilters {
   max_results: number;
@@ -29,6 +29,7 @@ interface AppState {
   isStreaming: boolean;
   isConnected: boolean;
   isIngesting: boolean;
+  ingestProgress: IngestStep | null;
   isLoadingBoard: boolean;
   isLoadingTickets: boolean;
   piiWarnings: Record<number, string>;
@@ -48,6 +49,7 @@ interface AppState {
   setIsStreaming: (val: boolean) => void;
   setIsConnected: (val: boolean) => void;
   setIsIngesting: (val: boolean) => void;
+  setIngestProgress: (step: IngestStep | null) => void;
   setIsLoadingBoard: (val: boolean) => void;
   setIsLoadingTickets: (val: boolean) => void;
   setPiiWarning: (ticketId: number, warning: string) => void;
@@ -65,6 +67,7 @@ export const useAppStore = create<AppState>((set) => ({
   isStreaming: false,
   isConnected: false,
   isIngesting: false,
+  ingestProgress: null,
   isLoadingBoard: true,
   isLoadingTickets: true,
   piiWarnings: {},
@@ -115,7 +118,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   setIsConnected: (val) => set({ isConnected: val }),
 
-  setIsIngesting: (val) => set({ isIngesting: val }),
+  setIsIngesting: (val) => set({ isIngesting: val, ...(val ? {} : { ingestProgress: null }) }),
+
+  setIngestProgress: (step) => set({ ingestProgress: step }),
 
   setIsLoadingBoard: (val) => set({ isLoadingBoard: val }),
 

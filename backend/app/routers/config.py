@@ -47,7 +47,7 @@ async def list_integrations():
         raise HTTPException(status_code=503, detail="Database not ready")
     rows = await db.get_all_system_configs()
     # Filter out internal config entries (not real integrations)
-    internal = {"anonymization", "agent", "general"}
+    internal = {"anonymization", "agent", "general", "anon_llm"}
     return [_serialize_config(row) for row in rows if row.get("system_name") not in internal]
 
 
@@ -88,7 +88,7 @@ async def create_integration(body: IntegrationCreate):
         raise HTTPException(status_code=409, detail=f"La integracion '{body.system_name}' ya existe")
 
     # Reserved names
-    if body.system_name in ("anonymization", "agent", "general"):
+    if body.system_name in ("anonymization", "agent", "general", "anon_llm"):
         raise HTTPException(status_code=400, detail="Nombre reservado para configuracion interna")
 
     import json as _json
@@ -125,7 +125,7 @@ async def delete_integration(name: str):
     if not db:
         raise HTTPException(status_code=503, detail="Database not ready")
 
-    if name in ("anonymization", "agent", "general"):
+    if name in ("anonymization", "agent", "general", "anon_llm"):
         raise HTTPException(status_code=400, detail="No se puede eliminar configuracion interna")
 
     deleted = await db.delete_system_config(name)
@@ -273,8 +273,13 @@ async def get_general_settings():
     db = _get_app_state().get("db")
     if not db:
         raise HTTPException(status_code=503, detail="Database not ready")
-    config = await db.get_system_config("kosin")
-    polling = config.get("polling_interval_sec", 60) if config else 60
+    # Get polling from first active integration (any system)
+    all_configs = await db.get_all_system_configs()
+    polling = 60
+    for cfg in all_configs:
+        if cfg.get("system_name") not in ("anonymization", "agent", "general", "anon_llm") and cfg.get("is_active"):
+            polling = cfg.get("polling_interval_sec", 60)
+            break
     extra = await _get_general_extra(db)
     return {"polling_interval_sec": polling, "dark_mode": extra.get("dark_mode", False)}
 
@@ -566,6 +571,27 @@ async def update_agent_api_key(body: UpdateApiKeyRequest):
 _DEFAULT_ANON_CONFIG = {
     "detector_type": "composite",
     "sensitivity": 65,
+    "presidio_sensitivity": 65,
+    "presidio_entities": {
+        "PERSONA": True,
+        "UBICACION": True,
+        "ORGANIZACION": True,
+        "EMAIL": True,
+        "TELEFONO": True,
+        "IBAN": True,
+        "IP": True,
+        "DNI": True,
+        "TARJETA_CREDITO": True,
+        "FECHA": False,
+        "URL": False,
+    },
+    "presidio_excluded_words": [],
+    "presidio_min_lengths": {
+        "PERSONA": 4,
+        "UBICACION": 5,
+        "ORGANIZACION": 4,
+    },
+    "presidio_model": "es_core_news_lg",
     "pii_rules": {
         "names": True,
         "emails": True,
@@ -642,7 +668,12 @@ async def get_anonymization_settings():
 
 class AnonymizationUpdate(BaseModel):
     detector_type: Optional[str] = None  # "regex", "presidio", "composite"
-    sensitivity: Optional[int] = None  # 0-100
+    sensitivity: Optional[int] = None  # 0-100 (regex layer)
+    presidio_sensitivity: Optional[int] = None  # 0-100 (presidio NLP layer)
+    presidio_entities: Optional[Dict[str, bool]] = None  # entity type toggles
+    presidio_excluded_words: Optional[List[str]] = None  # false positive whitelist
+    presidio_min_lengths: Optional[Dict[str, int]] = None  # min text length per entity
+    presidio_model: Optional[str] = None  # spacy model name
     pii_rules: Optional[Dict[str, bool]] = None
     substitution_technique: Optional[str] = None  # "redacted", "synthetic", "aes256"
 
@@ -663,6 +694,23 @@ async def update_anonymization_settings(body: AnonymizationUpdate):
     if body.sensitivity is not None:
         config["sensitivity"] = max(0, min(100, body.sensitivity))
 
+    if body.presidio_sensitivity is not None:
+        config["presidio_sensitivity"] = max(0, min(100, body.presidio_sensitivity))
+
+    if body.presidio_entities is not None:
+        config["presidio_entities"] = {**config.get("presidio_entities", {}), **body.presidio_entities}
+
+    if body.presidio_excluded_words is not None:
+        config["presidio_excluded_words"] = body.presidio_excluded_words
+
+    if body.presidio_min_lengths is not None:
+        config["presidio_min_lengths"] = {**config.get("presidio_min_lengths", {}), **body.presidio_min_lengths}
+
+    if body.presidio_model is not None:
+        allowed_models = {"es_core_news_sm", "es_core_news_md", "es_core_news_lg"}
+        if body.presidio_model in allowed_models:
+            config["presidio_model"] = body.presidio_model
+
     if body.pii_rules is not None:
         config["pii_rules"] = {**config.get("pii_rules", {}), **body.pii_rules}
 
@@ -675,16 +723,31 @@ async def update_anonymization_settings(body: AnonymizationUpdate):
         extra_config=json.dumps(config),
     )
 
-    # Hot-reload detector if changed
-    if body.detector_type is not None:
+    # Hot-reload detector if any detection-related param changed
+    needs_reload = any([
+        body.detector_type is not None,
+        body.presidio_sensitivity is not None,
+        body.presidio_entities is not None,
+        body.presidio_excluded_words is not None,
+        body.presidio_min_lengths is not None,
+        body.presidio_model is not None,
+    ])
+    if needs_reload:
         try:
             state = _get_app_state()
-            new_detector = _create_detector(body.detector_type)
+            presidio_cfg = {
+                "score_threshold": config.get("presidio_sensitivity", 65),
+                "enabled_entities": config.get("presidio_entities"),
+                "excluded_words": config.get("presidio_excluded_words"),
+                "min_lengths": config.get("presidio_min_lengths"),
+                "model_name": config.get("presidio_model", "es_core_news_lg"),
+            }
+            new_detector = _create_detector(config["detector_type"], presidio_config=presidio_cfg)
             state["detector"] = new_detector
             # Recreate anonymizer with new detector
             from ..services.anonymizer import Anonymizer
             state["anonymizer"] = Anonymizer(detector=new_detector)
-            logger.info("detector_hot_reloaded", type=body.detector_type)
+            logger.info("detector_hot_reloaded", type=config["detector_type"])
         except Exception as e:
             logger.error("detector_hot_reload_failed", error=str(e))
             return {**config, "warning": f"Config guardada pero fallo al cambiar detector: {str(e)}"}
@@ -692,14 +755,218 @@ async def update_anonymization_settings(body: AnonymizationUpdate):
     return config
 
 
-def _create_detector(detector_type: str):
-    """Create a new detector instance by type."""
+def _create_detector(detector_type: str, presidio_config: dict = None):
+    """Create a new detector instance by type, passing Presidio config if applicable."""
     if detector_type == "regex":
         from ..services.detection import RegexDetector
         return RegexDetector()
     elif detector_type == "presidio":
         from ..services.detection import PresidioDetector
-        return PresidioDetector()
+        kwargs = presidio_config or {}
+        return PresidioDetector(**kwargs)
     else:  # composite
         from ..services.detection import CompositeDetector
-        return CompositeDetector()
+        return CompositeDetector(presidio_config=presidio_config)
+
+
+# --- Anonymization LLM config endpoints ---
+
+_DEFAULT_ANON_LLM_CONFIG = {
+    "enabled": False,
+    "provider": "openai",
+    "model": "",
+    "temperature": 0.0,
+    "system_prompt": "",
+}
+
+
+async def _get_anon_llm_config(db) -> dict:
+    """Get anon_llm config from system_config table, seeding defaults if absent."""
+    row = await db.get_system_config("anon_llm")
+    if row and row.get("extra_config"):
+        raw = row["extra_config"]
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif isinstance(raw, dict):
+            return raw
+    # Seed defaults (check if anon_llm is already active from env)
+    from ..config import settings as s
+    defaults = dict(_DEFAULT_ANON_LLM_CONFIG)
+    if s.anon_llm_provider:
+        defaults["enabled"] = True
+        defaults["provider"] = s.anon_llm_provider
+        defaults["model"] = s.anon_llm_model
+        defaults["temperature"] = s.anon_llm_temperature
+    await db.upsert_system_config(
+        "anon_llm",
+        display_name="Anonymization LLM Config",
+        system_type="internal",
+        connector_type="none",
+        extra_config=json.dumps(defaults),
+    )
+    return defaults
+
+
+@router.get("/anon-llm")
+async def get_anon_llm_config():
+    db = _get_app_state().get("db")
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    from ..config import settings as s
+    config = await _get_anon_llm_config(db)
+    state = _get_app_state()
+
+    from ..services.agent import ANON_LLM_SYSTEM_PROMPT
+    custom_prompt = config.get("system_prompt", "")
+
+    result = {
+        "enabled": config.get("enabled", False),
+        "provider": config.get("provider", "openai"),
+        "model": config.get("model", ""),
+        "temperature": config.get("temperature", 0.0),
+        "system_prompt": custom_prompt if custom_prompt else ANON_LLM_SYSTEM_PROMPT,
+        "default_prompt": ANON_LLM_SYSTEM_PROMPT,
+        "available_providers": ["openai", "axet"],
+    }
+
+    # Check runtime state
+    if state.get("anon_llm") is not None:
+        result["enabled"] = True
+
+    return result
+
+
+class AnonLlmUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    system_prompt: Optional[str] = None
+    api_key: Optional[str] = None
+    axet_project_id: Optional[str] = None
+    axet_asset_id: Optional[str] = None
+
+
+@router.put("/anon-llm")
+async def update_anon_llm_config(body: AnonLlmUpdate):
+    db = _get_app_state().get("db")
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    state = _get_app_state()
+    config = await _get_anon_llm_config(db)
+
+    if body.enabled is not None:
+        config["enabled"] = body.enabled
+    if body.provider is not None:
+        config["provider"] = body.provider
+    if body.model is not None:
+        config["model"] = body.model
+    if body.temperature is not None:
+        config["temperature"] = max(0.0, min(1.0, body.temperature))
+    if body.system_prompt is not None:
+        config["system_prompt"] = body.system_prompt
+    if body.api_key is not None and body.api_key != "":
+        config["api_key"] = body.api_key
+    if body.axet_project_id is not None:
+        config["axet_project_id"] = body.axet_project_id
+    if body.axet_asset_id is not None:
+        config["axet_asset_id"] = body.axet_asset_id
+
+    # Persist
+    await db.upsert_system_config("anon_llm", extra_config=json.dumps(config))
+
+    # Hot-reload anon_llm in runtime
+    if config.get("enabled") and config.get("provider") and config.get("model"):
+        try:
+            from ..services.agent import AnonymizationLLM
+            from ..services.agent import ANON_LLM_SYSTEM_PROMPT
+            from ..config import settings as s
+            custom_prompt = config.get("system_prompt", "") or ANON_LLM_SYSTEM_PROMPT
+
+            # Build provider-specific kwargs
+            llm_kwargs = {}
+            if config["provider"] == "axet":
+                llm_kwargs["axet_bearer_token"] = s.axet_bearer_token
+                llm_kwargs["axet_asset_id"] = config.get("axet_asset_id") or s.axet_asset_id
+                llm_kwargs["axet_project_id"] = config.get("axet_project_id") or s.axet_project_id
+            elif config["provider"] == "openai":
+                llm_kwargs["openai_api_key"] = config.get("api_key") or s.openai_api_key
+
+            existing = state.get("anon_llm")
+            if existing:
+                existing.update_llm(
+                    provider=config["provider"],
+                    model=config["model"],
+                    temperature=config.get("temperature", 0.0),
+                    **llm_kwargs,
+                )
+                existing.system_prompt = custom_prompt
+            else:
+                anon_llm = AnonymizationLLM(
+                    provider=config["provider"],
+                    model=config["model"],
+                    temperature=config.get("temperature", 0.0),
+                    system_prompt=custom_prompt,
+                    **llm_kwargs,
+                )
+                state["anon_llm"] = anon_llm
+            # Update agent reference
+            agent = state.get("agent")
+            if agent:
+                agent.anon_llm = state["anon_llm"]
+            logger.info("anon_llm_hot_reloaded", provider=config["provider"], model=config["model"])
+        except Exception as e:
+            logger.error("anon_llm_hot_reload_failed", error=str(e))
+            return {**config, "warning": f"Config guardada pero fallo al recargar Anon LLM: {str(e)}"}
+    elif not config.get("enabled"):
+        state["anon_llm"] = None
+        agent = state.get("agent")
+        if agent:
+            agent.anon_llm = None
+        logger.info("anon_llm_disabled")
+
+    return config
+
+
+@router.post("/anon-llm/test-connection")
+async def test_anon_llm_connection(body: TestConnectionRequest):
+    """Test Anonymization LLM connection with given provider config."""
+    from ..services.agent import AnonymizationAgent
+    from ..config import settings as s
+
+    try:
+        kwargs = {}
+        model = body.model
+
+        if body.provider == "openai":
+            kwargs["openai_api_key"] = body.api_key or s.openai_api_key
+            model = model or s.openai_model
+        elif body.provider == "axet":
+            kwargs["axet_bearer_token"] = body.axet_bearer_token or s.axet_bearer_token
+            kwargs["axet_asset_id"] = body.axet_asset_id or s.axet_asset_id
+            kwargs["axet_project_id"] = body.axet_project_id or s.axet_project_id
+            model = model or s.axet_model
+        elif body.provider == "ollama":
+            kwargs["ollama_base_url"] = body.ollama_base_url or s.ollama_base_url
+            model = model or s.ollama_model
+
+        llm = AnonymizationAgent._create_llm(
+            provider=body.provider,
+            model=model,
+            temperature=0.0,
+            **kwargs,
+        )
+
+        from langchain_core.messages import HumanMessage
+        response = await llm.ainvoke([HumanMessage(content="Responde solo: OK")])
+        content = response.content if hasattr(response, "content") else str(response)
+
+        return {"success": True, "message": f"Conexion exitosa con {body.provider}/{model}", "response": content[:100]}
+    except Exception as e:
+        logger.error("anon_llm_test_connection_failed", provider=body.provider, error=repr(e))
+        return {"success": False, "message": f"Error de conexion: {str(e)}"}

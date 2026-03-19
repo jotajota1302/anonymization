@@ -68,6 +68,34 @@ class ConnectionManager:
             "ticket_id": ticket_id,
         })
 
+    async def send_ingest_progress(
+        self,
+        client_id: str,
+        step: str,
+        step_index: int,
+        total_steps: int,
+        status: str,
+        source_key: str,
+        detail: Optional[str] = None,
+        pii_count: Optional[int] = None,
+    ):
+        """Send an ingest progress update to the client."""
+        payload: dict = {
+            "step": step,
+            "step_index": step_index,
+            "total_steps": total_steps,
+            "status": status,
+            "source_key": source_key,
+        }
+        if detail is not None:
+            payload["detail"] = detail
+        if pii_count is not None:
+            payload["pii_count"] = pii_count
+        await self.send_message(client_id, {
+            "type": "ingest_progress",
+            "data": payload,
+        })
+
     async def broadcast(self, data: dict):
         """Broadcast a message to all connected clients."""
         disconnected = []

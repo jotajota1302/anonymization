@@ -52,6 +52,20 @@ const tabs: { id: Tab; label: string; icon: JSX.Element }[] = [
   { id: "tickets", label: "Tickets", icon: <IconDatabase /> },
 ];
 
+const PRESIDIO_ENTITIES_META: { id: string; label: string; category: string }[] = [
+  { id: "PERSONA", label: "Personas (NER)", category: "NLP" },
+  { id: "UBICACION", label: "Ubicaciones", category: "NLP" },
+  { id: "ORGANIZACION", label: "Organizaciones", category: "NLP" },
+  { id: "EMAIL", label: "Emails", category: "Patron" },
+  { id: "TELEFONO", label: "Telefonos", category: "Patron" },
+  { id: "IBAN", label: "IBAN", category: "Patron" },
+  { id: "IP", label: "Direcciones IP", category: "Patron" },
+  { id: "DNI", label: "DNI / NIF / NIE / CIF", category: "Patron" },
+  { id: "TARJETA_CREDITO", label: "Tarjetas de credito", category: "Patron" },
+  { id: "FECHA", label: "Fechas", category: "NLP" },
+  { id: "URL", label: "URLs", category: "Patron" },
+];
+
 const PII_RULES_META: { id: string; label: string; category: string }[] = [
   { id: "names", label: "Nombres y Apellidos", category: "Personal" },
   { id: "emails", label: "Emails", category: "Personal" },
@@ -132,6 +146,32 @@ export default function ConfigPage() {
   const [anonLoaded, setAnonLoaded] = useState(false);
   const [anonSaving, setAnonSaving] = useState(false);
   const [anonSaved, setAnonSaved] = useState(false);
+  const [anonOpenPanel, setAnonOpenPanel] = useState<"regex" | "presidio" | "llm" | "output" | null>(null);
+  const [presidioSensitivity, setPresidioSensitivity] = useState(65);
+  const [presidioEntities, setPresidioEntities] = useState<Record<string, boolean>>({
+    PERSONA: true, UBICACION: true, ORGANIZACION: true, EMAIL: true,
+    TELEFONO: true, IBAN: true, IP: true, DNI: true,
+    TARJETA_CREDITO: true, FECHA: false, URL: false,
+  });
+  const [presidioExcludedWords, setPresidioExcludedWords] = useState<string[]>([]);
+  const [presidioNewWord, setPresidioNewWord] = useState("");
+  const [presidioMinLengths, setPresidioMinLengths] = useState<Record<string, number>>({
+    PERSONA: 4, UBICACION: 5, ORGANIZACION: 4,
+  });
+  const [presidioModel, setPresidioModel] = useState("es_core_news_lg");
+
+  // Anonymization LLM state
+  const [anonLlmEnabled, setAnonLlmEnabled] = useState(false);
+  const [anonLlmProvider, setAnonLlmProvider] = useState("openai");
+  const [anonLlmModel, setAnonLlmModel] = useState("");
+  const [anonLlmTemp, setAnonLlmTemp] = useState(0.0);
+  const [anonLlmSaving, setAnonLlmSaving] = useState(false);
+  const [anonLlmSaved, setAnonLlmSaved] = useState(false);
+  const [anonLlmTestResult, setAnonLlmTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [anonLlmTesting, setAnonLlmTesting] = useState(false);
+  const [anonLlmPrompt, setAnonLlmPrompt] = useState("");
+  const [anonLlmDefaultPrompt, setAnonLlmDefaultPrompt] = useState("");
+  const [anonLlmApiKey, setAnonLlmApiKey] = useState("");
 
   // Integrations state
   const [integrations, setIntegrations] = useState<IntegrationConfig[]>([]);
@@ -239,12 +279,34 @@ export default function ConfigPage() {
         setActiveDetector(data.active_detector || "unknown");
         setPresidioAvailable(data.presidio_available || false);
         setSensitivity(data.sensitivity ?? 65);
+        setPresidioSensitivity(data.presidio_sensitivity ?? 65);
+        if (data.presidio_entities) setPresidioEntities(data.presidio_entities);
+        if (data.presidio_excluded_words) setPresidioExcludedWords(data.presidio_excluded_words);
+        if (data.presidio_min_lengths) setPresidioMinLengths(data.presidio_min_lengths);
+        if (data.presidio_model) setPresidioModel(data.presidio_model);
         setSubstitutionTechnique(data.substitution_technique || "synthetic");
         if (data.pii_rules) setPiiStates(data.pii_rules);
         setAnonLoaded(true);
       }
     } catch (err) {
       console.error("Failed to fetch anonymization settings:", err);
+    }
+  }, []);
+
+  const fetchAnonLlmConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/config/anon-llm`);
+      if (res.ok) {
+        const data = await res.json();
+        setAnonLlmEnabled(data.enabled ?? false);
+        setAnonLlmProvider(data.provider || "openai");
+        setAnonLlmModel(data.model || "");
+        setAnonLlmTemp(data.temperature ?? 0.0);
+        setAnonLlmPrompt(data.system_prompt || "");
+        setAnonLlmDefaultPrompt(data.default_prompt || "");
+      }
+    } catch (err) {
+      console.error("Failed to fetch anon LLM config:", err);
     }
   }, []);
 
@@ -275,7 +337,8 @@ export default function ConfigPage() {
     fetchAdminTickets();
     fetchAnonymization();
     fetchAgentConfig();
-  }, [fetchIntegrations, fetchGeneralSettings, fetchAdminTickets, fetchAnonymization, fetchAgentConfig]);
+    fetchAnonLlmConfig();
+  }, [fetchIntegrations, fetchGeneralSettings, fetchAdminTickets, fetchAnonymization, fetchAgentConfig, fetchAnonLlmConfig]);
 
   // Axet OAuth: fetch auth status and listen for popup messages
   const fetchAxetAuthStatus = useCallback(async () => {
@@ -497,6 +560,11 @@ export default function ConfigPage() {
         body: JSON.stringify({
           detector_type: detectorType,
           sensitivity,
+          presidio_sensitivity: presidioSensitivity,
+          presidio_entities: presidioEntities,
+          presidio_excluded_words: presidioExcludedWords,
+          presidio_min_lengths: presidioMinLengths,
+          presidio_model: presidioModel,
           pii_rules: piiStates,
           substitution_technique: substitutionTechnique,
         }),
@@ -512,6 +580,63 @@ export default function ConfigPage() {
       console.error("Failed to save anonymization settings:", err);
     } finally {
       setAnonSaving(false);
+    }
+  };
+
+  // Anon LLM handlers
+  const handleSaveAnonLlm = async () => {
+    setAnonLlmSaving(true);
+    setAnonLlmSaved(false);
+    try {
+      const res = await fetch(`${API_URL}/api/config/anon-llm`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: anonLlmEnabled,
+          provider: anonLlmProvider,
+          model: anonLlmModel,
+          temperature: anonLlmTemp,
+          system_prompt: anonLlmPrompt,
+          ...(anonLlmProvider === "openai" && anonLlmApiKey ? { api_key: anonLlmApiKey } : {}),
+          ...(anonLlmProvider === "axet" && axetProjectId ? { axet_project_id: axetProjectId } : {}),
+          ...(anonLlmProvider === "axet" && axetAssetId ? { axet_asset_id: axetAssetId } : {}),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.warning) console.warn("Anon LLM save warning:", data.warning);
+        setAnonLlmSaved(true);
+        setTimeout(() => setAnonLlmSaved(false), 3000);
+        await fetchAnonLlmConfig();
+      }
+    } catch (err) {
+      console.error("Failed to save anon LLM config:", err);
+    } finally {
+      setAnonLlmSaving(false);
+    }
+  };
+
+  const handleTestAnonLlm = async () => {
+    setAnonLlmTesting(true);
+    setAnonLlmTestResult(null);
+    try {
+      const res = await fetch(`${API_URL}/api/config/anon-llm/test-connection`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: anonLlmProvider,
+          model: anonLlmModel,
+          ...(anonLlmProvider === "openai" && anonLlmApiKey ? { api_key: anonLlmApiKey } : {}),
+          ...(anonLlmProvider === "axet" && axetProjectId ? { axet_project_id: axetProjectId } : {}),
+          ...(anonLlmProvider === "axet" && axetAssetId ? { axet_asset_id: axetAssetId } : {}),
+        }),
+      });
+      const data = await res.json();
+      setAnonLlmTestResult({ success: data.success, message: data.message });
+    } catch {
+      setAnonLlmTestResult({ success: false, message: "Error de red" });
+    } finally {
+      setAnonLlmTesting(false);
     }
   };
 
@@ -592,8 +717,6 @@ export default function ConfigPage() {
     }
   };
 
-  const sensitivityLabel = sensitivity < 35 ? "CONSERVADOR" : sensitivity < 70 ? "EQUILIBRADO" : "AGRESIVO";
-  const sensitivityColor = sensitivity < 35 ? "text-green-600" : sensitivity < 70 ? "text-primary" : "text-red-500";
 
   const activeToolsCount = agentTools.filter((t) => t.enabled).length;
   const promptModified = agentPrompt !== agentPromptSaved;
@@ -1137,153 +1260,549 @@ export default function ConfigPage() {
             )}
 
             {/* ===== ANONYMIZATION TAB ===== */}
-            {activeTab === "anonymization" && (
-              <div className="space-y-8">
-                {/* Detection Engine */}
-                <section>
-                  <h2 className={h2Cls}>Motor de Deteccion</h2>
-                  <p className={`${descCls} mb-4`}>Selecciona el motor que analiza texto en busca de datos personales (PII).</p>
-                  <div className="space-y-3">
-                    {[
-                      { id: "regex", title: "Solo Regex", desc: "Patrones regex para email, DNI, IBAN, IP, telefonos y nombres espanoles. Rapido, sin dependencias externas.", icon: "Rx" },
-                      { id: "presidio", title: "Microsoft Presidio (NLP)", desc: "Usa spaCy con modelo es_core_news_lg para deteccion NLP avanzada. Mejor con nombres, organizaciones y ubicaciones.", icon: "AI", requiresPresidio: true },
-                      { id: "composite", title: "Compuesto (Recomendado)", desc: "Combina Presidio + Regex. Presidio detecta entidades NLP, Regex cubre patrones estructurados. Mejor cobertura.", icon: "\u2726", requiresPresidio: true },
-                    ].map((opt) => (
-                      <label key={opt.id}
-                        className={`flex items-start gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-                          detectorType === opt.id
-                            ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
-                            : opt.requiresPresidio && !presidioAvailable
-                              ? "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 opacity-60 cursor-not-allowed"
-                              : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600"
-                        }`}>
-                        <div className={`mt-0.5 w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${
-                          detectorType === opt.id ? "bg-primary text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
-                        }`}>
-                          {opt.icon}
-                        </div>
-                        <div className="flex-1">
-                          <input type="radio" name="detector" value={opt.id}
-                            checked={detectorType === opt.id}
-                            disabled={opt.requiresPresidio && !presidioAvailable}
-                            onChange={(e) => setDetectorType(e.target.value)} className="sr-only" />
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{opt.title}</p>
-                            {opt.requiresPresidio && !presidioAvailable && (
-                              <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">NO INSTALADO</span>
+            {activeTab === "anonymization" && (() => {
+              const anonPanels = [
+                { id: "regex" as const, label: "Regex", icon: "Rx", desc: "Patrones deterministas", always: false },
+                { id: "presidio" as const, label: "Presidio NLP", icon: "AI", desc: "Deteccion con spaCy", always: false },
+                { id: "llm" as const, label: "LLM Validador", icon: "\u2728", desc: "Validacion por IA", always: false },
+                { id: "output" as const, label: "Sustitucion", icon: "\u2192", desc: "Como se reemplazan", always: true },
+              ];
+              type AnonPanel = "regex" | "presidio" | "llm" | "output";
+              const isRegexActive = detectorType === "regex" || detectorType === "composite";
+              const isPresidioActive = detectorType === "presidio" || detectorType === "composite";
+
+              return (
+              <div className="space-y-6">
+                {/* Intro */}
+                <div>
+                  <h2 className={h2Cls}>Pipeline de Anonimizacion</h2>
+                  <p className={descCls}>Cada capa filtra datos personales. Activa las que necesites — se ejecutan en orden de arriba a abajo.</p>
+                </div>
+
+                {/* Accordion panels */}
+                <div className="space-y-3">
+                  {anonPanels.map((panel, idx) => {
+                    const isOpen = anonOpenPanel === panel.id;
+                    const layerEnabled = panel.id === "regex" ? isRegexActive
+                      : panel.id === "presidio" ? isPresidioActive
+                      : panel.id === "llm" ? anonLlmEnabled
+                      : true;
+
+                    return (
+                      <div key={panel.id} className={`${cardCls} overflow-hidden transition-all`}>
+                        {/* Header */}
+                        <button type="button" onClick={() => setAnonOpenPanel(isOpen ? null : panel.id)}
+                          className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors">
+                          {/* Step number */}
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${
+                            layerEnabled ? "bg-primary text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500"
+                          }`}>
+                            {panel.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{panel.label}</p>
+                              {panel.always ? (
+                                <span className="px-1.5 py-0.5 text-xs font-bold bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 rounded">ACTIVO</span>
+                              ) : layerEnabled ? (
+                                <span className="px-1.5 py-0.5 text-xs font-bold bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 rounded">ON</span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded">OFF</span>
+                              )}
+                              {idx < 3 && <span className="text-xs text-slate-400 dark:text-slate-500">Capa {idx + 1}</span>}
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">{panel.desc}</p>
+                          </div>
+                          <svg className={`w-5 h-5 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                        </button>
+
+                        {/* Collapsible content */}
+                        {isOpen && (
+                          <div className="px-5 pb-5 border-t border-slate-100 dark:border-slate-700 pt-4 space-y-4">
+
+                            {/* ===== REGEX PANEL ===== */}
+                            {panel.id === "regex" && (
+                              <>
+                                <div className="flex items-center justify-between">
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 flex-1">
+                                    Detecta patrones estructurados: emails, DNI, IBAN, IPs, telefonos y nombres espanoles.
+                                  </p>
+                                  <button type="button"
+                                    onClick={() => {
+                                      if (isRegexActive && isPresidioActive) setDetectorType("presidio");
+                                      else if (isRegexActive) setDetectorType("presidio");
+                                      else if (isPresidioActive) setDetectorType("composite");
+                                      else setDetectorType("regex");
+                                    }}
+                                    className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-4 ${isRegexActive ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
+                                  >
+                                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${isRegexActive ? "left-[22px]" : "left-0.5"}`} />
+                                  </button>
+                                </div>
+
+                                {!isRegexActive && (
+                                  <p className="text-xs text-slate-400 dark:text-slate-500 italic">Deshabilitado.</p>
+                                )}
+
+                                {isRegexActive && (
+                                  <>
+                                    {/* PII rules */}
+                                    <div>
+                                      <span className={labelCls}>Patrones detectados</span>
+                                      <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                                        {PII_RULES_META.map((rule) => (
+                                          <div key={rule.id} className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
+                                            <div className="flex items-center gap-2">
+                                              <span className="px-1.5 py-0.5 text-[10px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded uppercase">{rule.category}</span>
+                                              <span className="text-sm text-slate-800 dark:text-slate-200">{rule.label}</span>
+                                            </div>
+                                            <button type="button"
+                                              onClick={() => setPiiStates((s) => ({ ...s, [rule.id]: !s[rule.id] }))}
+                                              className={`relative w-9 h-[18px] rounded-full transition-colors ${piiStates[rule.id] ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
+                                            >
+                                              <span className={`absolute top-[1px] w-4 h-4 bg-white rounded-full shadow transition-transform ${piiStates[rule.id] ? "left-[19px]" : "left-[1px]"}`} />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
+                              </>
                             )}
-                            {detectorType === opt.id && activeDetector === opt.id && (
-                              <span className="px-1.5 py-0.5 text-xs font-bold bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 rounded">ACTIVO</span>
+
+                            {/* ===== PRESIDIO PANEL ===== */}
+                            {panel.id === "presidio" && (
+                              <>
+                                <div className="flex items-center justify-between">
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 flex-1">
+                                    Microsoft Presidio con spaCy (es_core_news_lg). Detecta nombres, organizaciones y ubicaciones por NLP.
+                                  </p>
+                                  <button type="button"
+                                    onClick={() => {
+                                      if (!presidioAvailable) return;
+                                      if (isPresidioActive) setDetectorType("regex");
+                                      else setDetectorType("composite");
+                                    }}
+                                    disabled={!presidioAvailable}
+                                    className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-4 ${!presidioAvailable ? "bg-slate-200 dark:bg-slate-700 cursor-not-allowed" : isPresidioActive ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
+                                  >
+                                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${isPresidioActive ? "left-[22px]" : "left-0.5"}`} />
+                                  </button>
+                                </div>
+
+                                {!presidioAvailable ? (
+                                  <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                                    <p className="text-xs text-amber-800 dark:text-amber-300 font-medium">Presidio no esta instalado. Para habilitarlo:</p>
+                                    <code className="block mt-1 text-xs text-amber-700 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/30 px-2 py-1 rounded font-mono">
+                                      pip install presidio-analyzer &amp;&amp; python -m spacy download es_core_news_lg
+                                    </code>
+                                  </div>
+                                ) : isPresidioActive ? (
+                                  <div className="space-y-4">
+                                    {/* Umbral de confianza */}
+                                    <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className={labelCls}>Umbral de confianza NLP</span>
+                                        <span className={`text-sm font-bold ${presidioSensitivity < 35 ? "text-green-600" : presidioSensitivity < 70 ? "text-primary" : "text-red-500"}`}>
+                                          {presidioSensitivity < 35 ? "CONSERVADOR" : presidioSensitivity < 70 ? "EQUILIBRADO" : "AGRESIVO"} ({presidioSensitivity}%)
+                                        </span>
+                                      </div>
+                                      <input type="range" min="0" max="100" value={presidioSensitivity} onChange={(e) => setPresidioSensitivity(Number(e.target.value))}
+                                        className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
+                                      <div className="flex justify-between mt-1">
+                                        <span className="text-xs text-slate-400">Menos detecciones</span>
+                                        <span className="text-xs text-slate-400">Mas detecciones</span>
+                                      </div>
+                                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                                        Score minimo de confianza del modelo NLP para reportar una entidad como PII.
+                                      </p>
+                                    </div>
+
+                                    {/* Entidades NLP */}
+                                    <div>
+                                      <span className={labelCls}>Entidades detectadas</span>
+                                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Tipos de PII que Presidio buscara en el texto.</p>
+                                      <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                                        {PRESIDIO_ENTITIES_META.map((ent) => (
+                                          <div key={ent.id} className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
+                                            <div className="flex items-center gap-2">
+                                              <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded uppercase ${ent.category === "NLP" ? "bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400" : "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400"}`}>{ent.category}</span>
+                                              <span className="text-sm text-slate-800 dark:text-slate-200">{ent.label}</span>
+                                            </div>
+                                            <button type="button"
+                                              onClick={() => setPresidioEntities((s) => ({ ...s, [ent.id]: !s[ent.id] }))}
+                                              className={`relative w-9 h-[18px] rounded-full transition-colors ${presidioEntities[ent.id] ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
+                                            >
+                                              <span className={`absolute top-[1px] w-4 h-4 bg-white rounded-full shadow transition-transform ${presidioEntities[ent.id] ? "left-[19px]" : "left-[1px]"}`} />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    {/* Longitud minima por entidad NER */}
+                                    <div>
+                                      <span className={labelCls}>Longitud minima por entidad</span>
+                                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Textos mas cortos que este limite se descartan como falsos positivos.</p>
+                                      <div className="grid grid-cols-3 gap-3">
+                                        {(["PERSONA", "UBICACION", "ORGANIZACION"] as const).map((key) => (
+                                          <div key={key} className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3">
+                                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">{key}</label>
+                                            <input type="number" min="0" max="50" value={presidioMinLengths[key] ?? 0}
+                                              onChange={(e) => setPresidioMinLengths((s) => ({ ...s, [key]: Number(e.target.value) }))}
+                                              className="w-full mt-1 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-sm text-center text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-primary" />
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    {/* Palabras excluidas (whitelist) */}
+                                    <div>
+                                      <span className={labelCls}>Palabras excluidas (whitelist)</span>
+                                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Palabras que nunca se marcaran como PII aunque Presidio las detecte.</p>
+                                      <div className="flex gap-2 mb-2">
+                                        <input type="text" value={presidioNewWord}
+                                          onChange={(e) => setPresidioNewWord(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter" && presidioNewWord.trim()) {
+                                              e.preventDefault();
+                                              const w = presidioNewWord.trim().toLowerCase();
+                                              if (!presidioExcludedWords.includes(w)) {
+                                                setPresidioExcludedWords([...presidioExcludedWords, w]);
+                                              }
+                                              setPresidioNewWord("");
+                                            }
+                                          }}
+                                          placeholder="Escribe una palabra y pulsa Enter"
+                                          className={inputCls} />
+                                        <button type="button"
+                                          onClick={() => {
+                                            const w = presidioNewWord.trim().toLowerCase();
+                                            if (w && !presidioExcludedWords.includes(w)) {
+                                              setPresidioExcludedWords([...presidioExcludedWords, w]);
+                                            }
+                                            setPresidioNewWord("");
+                                          }}
+                                          className="px-3 py-2 bg-primary text-white text-xs font-bold rounded-lg hover:bg-blue-600 transition-colors shrink-0">
+                                          Anadir
+                                        </button>
+                                      </div>
+                                      {presidioExcludedWords.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {presidioExcludedWords.map((w) => (
+                                            <span key={w} className="inline-flex items-center gap-1 px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-xs rounded-full border border-amber-200 dark:border-amber-800">
+                                              {w}
+                                              <button type="button"
+                                                onClick={() => setPresidioExcludedWords(presidioExcludedWords.filter((x) => x !== w))}
+                                                className="text-amber-500 hover:text-red-500 transition-colors font-bold ml-0.5">
+                                                x
+                                              </button>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Modelo spaCy */}
+                                    <div>
+                                      <span className={labelCls}>Modelo spaCy</span>
+                                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Modelo de lenguaje para NER. Los modelos mas grandes son mas precisos pero mas lentos.</p>
+                                      <div className="grid grid-cols-3 gap-2">
+                                        {([
+                                          { id: "es_core_news_sm", label: "Small", desc: "Rapido, menos preciso", size: "~12MB" },
+                                          { id: "es_core_news_md", label: "Medium", desc: "Equilibrado", size: "~40MB" },
+                                          { id: "es_core_news_lg", label: "Large", desc: "Mas preciso, mas lento", size: "~400MB" },
+                                        ]).map((m) => (
+                                          <button key={m.id} type="button"
+                                            onClick={() => setPresidioModel(m.id)}
+                                            className={`p-3 rounded-lg border-2 text-left transition-all ${presidioModel === m.id ? "border-primary bg-primary/5 dark:bg-primary/10" : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"}`}>
+                                            <span className={`text-sm font-bold ${presidioModel === m.id ? "text-primary" : "text-slate-700 dark:text-slate-300"}`}>{m.label}</span>
+                                            <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{m.desc}</span>
+                                            <span className="block text-[10px] text-slate-400 dark:text-slate-500">{m.size}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 italic">Requiere: python -m spacy download {presidioModel}</p>
+                                    </div>
+
+                                    {/* Status badge */}
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2 py-0.5 text-xs font-bold bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 rounded">
+                                        {activeDetector === "composite" ? "COMPUESTO" : "PRESIDIO"} ACTIVO
+                                      </span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-400 dark:text-slate-500 italic">Deshabilitado. Solo se usa deteccion Regex.</p>
+                                )}
+                              </>
+                            )}
+
+                            {/* ===== LLM PANEL ===== */}
+                            {panel.id === "llm" && (
+                              <>
+                                <div className="flex items-center justify-between">
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 flex-1">
+                                    LLM dedicado a validar PII en pre/post filtrado. Capa opcional adicional a Regex/Presidio.
+                                  </p>
+                                  <button type="button"
+                                    onClick={() => setAnonLlmEnabled(!anonLlmEnabled)}
+                                    className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-4 ${anonLlmEnabled ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
+                                  >
+                                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${anonLlmEnabled ? "left-[22px]" : "left-0.5"}`} />
+                                  </button>
+                                </div>
+
+                                {anonLlmEnabled ? (
+                                  <div className="space-y-4">
+                                    {/* Provider */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                      {[
+                                        { id: "openai", title: "OpenAI", desc: "GPT-4o mini", bgColor: "bg-slate-800 dark:bg-slate-600" },
+                                        { id: "axet", title: "Axet NTT", desc: "Proxy corporativo", bgColor: "bg-purple-600" },
+                                      ].map((p) => (
+                                        <button key={p.id} type="button" onClick={() => {
+                                          setAnonLlmProvider(p.id);
+                                          setAnonLlmTestResult(null);
+                                          if (p.id === "openai") setAnonLlmModel(agentConfig?.openai_config?.model || "gpt-4o-mini");
+                                          else if (p.id === "axet") {
+                                            setAnonLlmModel(agentConfig?.axet_config?.model || "gpt-4o-mini");
+                                            if (axetModels.length === 0) { fetchAxetAuthStatus(); fetchAxetModels(); }
+                                          }
+                                        }}
+                                          className={`p-3 rounded-xl border text-left transition-all ${
+                                            anonLlmProvider === p.id
+                                              ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
+                                              : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600"
+                                          }`}>
+                                          <div className="flex items-center gap-3">
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold ${p.bgColor}`}>
+                                              {p.id.slice(0, 2).toUpperCase()}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{p.title}</p>
+                                              <p className="text-xs text-slate-500 dark:text-slate-400">{p.desc}</p>
+                                            </div>
+                                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                                              anonLlmProvider === p.id ? "border-primary bg-primary" : "border-slate-300 dark:border-slate-600"
+                                            }`}>
+                                              {anonLlmProvider === p.id && <IconCheck />}
+                                            </div>
+                                          </div>
+                                        </button>
+                                      ))}
+                                    </div>
+
+                                    {/* Model + config */}
+                                    <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 space-y-4">
+                                      {anonLlmProvider === "openai" ? (
+                                        <div className="space-y-3">
+                                          <div>
+                                            <span className={labelCls}>API Key</span>
+                                            <input type="password" value={anonLlmApiKey} onChange={(e) => setAnonLlmApiKey(e.target.value)}
+                                              placeholder="sk-..." className={inputCls} />
+                                            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Clave propia para el validador PII. Independiente de la del Agente.</p>
+                                          </div>
+                                          <span className={labelCls}>Modelo</span>
+                                          <select value={anonLlmModel} onChange={(e) => setAnonLlmModel(e.target.value)} className={inputCls}>
+                                            {(agentConfig?.openai_config?.available_models || ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]).map((m: string) => (
+                                              <option key={m} value={m}>{m}</option>
+                                            ))}
+                                          </select>
+                                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Se recomienda gpt-4o-mini (rapido y economico).</p>
+                                        </div>
+                                      ) : anonLlmProvider === "axet" ? (
+                                        <div className="space-y-3">
+                                          {/* Okta inline status */}
+                                          <div className={`p-3 rounded-lg border ${
+                                            axetAuth?.authenticated
+                                              ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+                                              : axetDeviceCode
+                                                ? "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800"
+                                                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+                                          }`}>
+                                            {axetAuth?.authenticated ? (
+                                              <div className="flex items-center gap-2">
+                                                <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
+                                                <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                                                  {axetAuth.user?.displayName || axetAuth.user?.name || "Autenticado"}
+                                                </span>
+                                                <span className="text-xs text-slate-400">({Math.floor((axetAuth.expires_in || 0) / 60)} min)</span>
+                                              </div>
+                                            ) : axetDeviceCode ? (
+                                              <div className="text-center space-y-2">
+                                                <p className="text-xs text-slate-600 dark:text-slate-300">Introduce el codigo en OKTA:</p>
+                                                <p className="text-xl font-mono font-bold tracking-widest text-purple-700 dark:text-purple-400">{axetDeviceCode.user_code}</p>
+                                                <a href={axetDeviceCode.verification_uri_complete} target="_blank" rel="noopener noreferrer"
+                                                  className="inline-block px-3 py-1.5 text-xs font-bold text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors">
+                                                  Abrir OKTA
+                                                </a>
+                                                <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+                                                  <div className="w-2.5 h-2.5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                                                  Esperando...
+                                                </div>
+                                                <button type="button" onClick={() => { setAxetDeviceCode(null); setAxetPolling(false); }}
+                                                  className="text-xs text-slate-400 hover:text-slate-600">Cancelar</button>
+                                              </div>
+                                            ) : (
+                                              <div className="flex items-center justify-between">
+                                                <span className="text-xs text-slate-500">No autenticado en Axet</span>
+                                                <button type="button" disabled={axetAuthLoading}
+                                                  onClick={async () => {
+                                                    setAxetAuthLoading(true);
+                                                    try {
+                                                      const res = await fetch(`${API_URL}/api/axet/auth/start`, { method: "POST" });
+                                                      const data = await res.json();
+                                                      if (data.user_code) {
+                                                        setAxetDeviceCode({ user_code: data.user_code, verification_uri_complete: data.verification_uri_complete });
+                                                        setAxetPolling(true);
+                                                        const pollInterval = setInterval(async () => {
+                                                          try {
+                                                            const pollRes = await fetch(`${API_URL}/api/axet/auth/poll`, { method: "POST" });
+                                                            const pollData = await pollRes.json();
+                                                            if (pollData.status === "success") { clearInterval(pollInterval); setAxetDeviceCode(null); setAxetPolling(false); fetchAxetAuthStatus(); }
+                                                            else if (pollData.status === "expired" || pollData.status === "error") { clearInterval(pollInterval); setAxetDeviceCode(null); setAxetPolling(false); }
+                                                          } catch { clearInterval(pollInterval); setAxetDeviceCode(null); setAxetPolling(false); }
+                                                        }, 5000);
+                                                      }
+                                                    } catch {}
+                                                    setAxetAuthLoading(false);
+                                                  }}
+                                                  className="px-3 py-1.5 text-xs font-bold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                                                >
+                                                  {axetAuthLoading ? "..." : "Login OKTA"}
+                                                </button>
+                                              </div>
+                                            )}
+                                          </div>
+                                          {axetAuth?.authenticated && (
+                                            <div>
+                                              <span className={labelCls}>Modelo</span>
+                                              {axetModels.length > 0 ? (
+                                                <select value={anonLlmModel} onChange={(e) => setAnonLlmModel(e.target.value)} className={inputCls}>
+                                                  {axetModels.map((m) => (
+                                                    <option key={m.id} value={m.id}>{m.displayName || m.id}</option>
+                                                  ))}
+                                                </select>
+                                              ) : (
+                                                <input type="text" value={anonLlmModel} onChange={(e) => setAnonLlmModel(e.target.value)} placeholder="nombre-modelo" className={inputCls} />
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : null}
+
+                                      {/* Temperature */}
+                                      <div>
+                                        <span className={labelCls}>Temperatura: {(anonLlmTemp ?? 0).toFixed(1)}</span>
+                                        <input type="range" min="0" max="1" step="0.1" value={anonLlmTemp || 0}
+                                          onChange={(e) => setAnonLlmTemp(Number(e.target.value))}
+                                          className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
+                                        <p className="text-xs text-slate-400 mt-1">0.0 recomendado (determinista).</p>
+                                      </div>
+                                    </div>
+
+                                    {/* Test result */}
+                                    {anonLlmTestResult && (
+                                      <div className={`px-4 py-2.5 rounded-lg text-xs font-medium ${
+                                        anonLlmTestResult.success
+                                          ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800"
+                                          : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800"
+                                      }`}>
+                                        {anonLlmTestResult.message}
+                                      </div>
+                                    )}
+
+                                    {/* System Prompt */}
+                                    <div>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <span className={labelCls}>Prompt del validador</span>
+                                        {anonLlmPrompt !== anonLlmDefaultPrompt && (
+                                          <button type="button" onClick={() => setAnonLlmPrompt(anonLlmDefaultPrompt)}
+                                            className="text-[10px] text-primary hover:underline">Restaurar default</button>
+                                        )}
+                                      </div>
+                                      <textarea value={anonLlmPrompt} onChange={(e) => setAnonLlmPrompt(e.target.value)}
+                                        rows={8}
+                                        className={`${inputCls} font-mono text-xs leading-relaxed resize-y`}
+                                        placeholder="Prompt del sistema para el validador PII..." />
+                                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                                        Instrucciones que recibe el LLM para detectar PII no capturado por regex/Presidio.
+                                      </p>
+                                    </div>
+
+                                    {/* Actions */}
+                                    <div className="flex items-center justify-end gap-2">
+                                      <button type="button" onClick={handleTestAnonLlm} disabled={anonLlmTesting || !anonLlmModel}
+                                        className="px-3 py-1.5 text-xs font-semibold text-primary border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors disabled:opacity-50">
+                                        {anonLlmTesting ? "Probando..." : "Probar conexion"}
+                                      </button>
+                                      {anonLlmSaved && <span className="text-xs font-medium text-green-600 dark:text-green-400 flex items-center gap-1"><IconCheck /> OK</span>}
+                                      <button type="button" onClick={handleSaveAnonLlm} disabled={anonLlmSaving} className={btnPrimary}>
+                                        {anonLlmSaving ? "..." : "Guardar"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-400 dark:text-slate-500 italic">Deshabilitado. Solo se usa Regex/Presidio.</p>
+                                )}
+                              </>
+                            )}
+
+                            {/* ===== SUBSTITUTION PANEL ===== */}
+                            {panel.id === "output" && (
+                              <>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                  Como se reemplazan los datos personales detectados por las capas anteriores.
+                                </p>
+                                <div className="space-y-2">
+                                  {[
+                                    { id: "redacted", title: "Redaccion total [REDACTED]", desc: "Mascarado estatico sin contexto." },
+                                    { id: "synthetic", title: "Sustitucion sintetica [PERSONA_1]", desc: "Tokens tipo-entidad. Recomendado para soporte." },
+                                    { id: "aes256", title: "Cifrado reversible AES-256", desc: "Permite recuperacion autorizada de datos originales." },
+                                  ].map((opt) => (
+                                    <button key={opt.id} type="button" onClick={() => setSubstitutionTechnique(opt.id)}
+                                      className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all ${
+                                        substitutionTechnique === opt.id
+                                          ? "border-primary bg-primary/5 dark:bg-primary/10"
+                                          : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600"
+                                      }`}>
+                                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                                        substitutionTechnique === opt.id ? "border-primary bg-primary" : "border-slate-300 dark:border-slate-600"
+                                      }`}>
+                                        {substitutionTechnique === opt.id && <IconCheck />}
+                                      </div>
+                                      <div>
+                                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{opt.title}</p>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">{opt.desc}</p>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
                             )}
                           </div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{opt.desc}</p>
-                        </div>
-                        <div className={`mt-1 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                          detectorType === opt.id ? "border-primary bg-primary" : "border-slate-300 dark:border-slate-600"
-                        }`}>
-                          {detectorType === opt.id && <IconCheck />}
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                  {!presidioAvailable && (
-                    <div className="mt-3 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                      <p className="text-xs text-amber-800 dark:text-amber-300 font-medium">Presidio no esta instalado. Para habilitarlo:</p>
-                      <code className="block mt-1 text-xs text-amber-700 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/30 px-2 py-1 rounded font-mono">
-                        pip install presidio-analyzer &amp;&amp; python -m spacy download es_core_news_lg
-                      </code>
-                    </div>
-                  )}
-                </section>
-
-                {/* PII Rules */}
-                <section>
-                  <h2 className={h2Cls}>Reglas de PII</h2>
-                  <p className={`${descCls} mb-4`}>Configura que tipos de datos personales se detectan y anonimizan automaticamente.</p>
-                  <div className={`${cardCls} overflow-hidden`}>
-                    {PII_RULES_META.map((rule) => (
-                      <div key={rule.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <span className="px-2 py-0.5 text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded uppercase">{rule.category}</span>
-                          <span className="text-sm text-slate-800 dark:text-slate-200">{rule.label}</span>
-                        </div>
-                        <button
-                          onClick={() => setPiiStates((s) => ({ ...s, [rule.id]: !s[rule.id] }))}
-                          className={`relative w-10 h-5 rounded-full transition-colors ${piiStates[rule.id] ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
-                        >
-                          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${piiStates[rule.id] ? "left-[22px]" : "left-0.5"}`} />
-                        </button>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                </section>
+                    );
+                  })}
+                </div>
 
-                {/* Substitution Technique */}
-                <section>
-                  <h2 className={h2Cls}>Tecnica de Sustitucion</h2>
-                  <p className={`${descCls} mb-4`}>Elige como se reemplazan los datos personales detectados.</p>
-                  <div className="space-y-3">
-                    {[
-                      { id: "redacted", title: "Redaccion total (REDACTED)", desc: "Reemplaza todos los datos con [REDACTED]. Mascarado estatico sin contexto." },
-                      { id: "synthetic", title: "Sustitucion sintetica ([PERSONA_1])", desc: "Mantiene coherencia del texto con tokens tipo-entidad. Recomendado para soporte." },
-                      { id: "aes256", title: "Cifrado reversible (AES-256)", desc: "Cifrado reversible con clave maestra. Permite recuperacion autorizada de datos originales." },
-                    ].map((opt) => (
-                      <label key={opt.id}
-                        className={`flex items-start gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-                          substitutionTechnique === opt.id
-                            ? "border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
-                            : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600"
-                        }`}>
-                        <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                          substitutionTechnique === opt.id ? "border-primary bg-primary" : "border-slate-300 dark:border-slate-600"
-                        }`}>
-                          {substitutionTechnique === opt.id && <IconCheck />}
-                        </div>
-                        <div>
-                          <input type="radio" name="technique" value={opt.id} checked={substitutionTechnique === opt.id}
-                            onChange={(e) => setSubstitutionTechnique(e.target.value)} className="sr-only" />
-                          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{opt.title}</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{opt.desc}</p>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                </section>
-
-                {/* AI Sensitivity */}
-                <section>
-                  <h2 className={h2Cls}>Nivel de Sensibilidad</h2>
-                  <p className={`${descCls} mb-4`}>Ajusta el umbral de deteccion. Mayor sensibilidad = mas detecciones pero posibles falsos positivos.</p>
-                  <div className={`${cardCls} p-6`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase">Conservador</span>
-                      <span className={`text-sm font-bold ${sensitivityColor}`}>{sensitivityLabel} ({sensitivity}%)</span>
-                      <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase">Agresivo</span>
-                    </div>
-                    <input type="range" min="0" max="100" value={sensitivity} onChange={(e) => setSensitivity(Number(e.target.value))}
-                      className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md" />
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-3 leading-relaxed">
-                      {detectorType === "presidio" || detectorType === "composite"
-                        ? `Con Presidio activo, el umbral de confianza del modelo NLP se ajusta al ${sensitivity}%. Valores altos detectan mas entidades pero pueden generar falsos positivos.`
-                        : `El motor Regex usa patrones deterministas. La sensibilidad afecta heuristicas de nombres (${sensitivity}% umbral de coincidencia).`
-                      }
-                    </p>
-                  </div>
-                </section>
-
-                {/* Save button */}
+                {/* Global save */}
                 <div className="flex items-center justify-end gap-3">
                   {anonSaved && (
                     <span className="text-sm font-medium text-green-600 dark:text-green-400 flex items-center gap-1">
                       <IconCheck /> Guardado
                     </span>
                   )}
-                  <button onClick={handleSaveAnonymization} disabled={anonSaving} className={btnPrimary}>
+                  <button type="button" onClick={handleSaveAnonymization} disabled={anonSaving} className={btnPrimary}>
                     {anonSaving ? "Guardando..." : "Guardar configuracion"}
                   </button>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* ===== INTEGRATIONS TAB ===== */}
             {activeTab === "integrations" && (() => {

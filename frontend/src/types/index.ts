@@ -22,11 +22,24 @@ export interface ChatMessage {
   timestamp: string;
 }
 
-export interface WSMessage {
-  type: "token" | "complete" | "error" | "info";
-  data: string;
-  ticket_id: number | null;
+export interface DetectorResult {
+  status: "pending" | "in_progress" | "completed" | "skipped";
+  count: number | null;
 }
+
+export interface IngestStep {
+  step: "reading_source" | "detecting_pii" | "creating_destination" | "completed";
+  step_index: number;
+  total_steps: number;
+  status: "in_progress" | "completed" | "error";
+  source_key: string;
+  detail?: string;
+  detectors?: Record<string, DetectorResult>;
+}
+
+export type WSMessage =
+  | { type: "token" | "complete" | "error" | "info"; data: string; ticket_id: number | null }
+  | { type: "ingest_progress"; data: IngestStep; ticket_id: number | null };
 
 export interface BoardTicket {
   key: string;

@@ -22,7 +22,7 @@ async def update_ticket(
     """
     from ..main import app_state
 
-    kosin = app_state["kosin_connector"]
+    kosin = app_state["destination_connector"]
     results = []
 
     try:
@@ -62,7 +62,7 @@ async def create_ticket(
     """
     from ..main import app_state
 
-    kosin = app_state["kosin_connector"]
+    kosin = app_state["destination_connector"]
 
     try:
         key = await kosin.create_ticket(summary, description, priority)
