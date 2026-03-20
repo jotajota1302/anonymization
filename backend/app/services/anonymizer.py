@@ -140,20 +140,31 @@ class Anonymizer:
         """Run detection returning per-detector entity counts.
 
         Returns dict with keys 'regex', 'presidio', 'total'.
-        Value is None when a detector is not available.
+        Value is None when a detector is not available/active.
         """
-        from .detection import CompositeDetector, RegexDetector, PresidioDetector
+        from .detection import CompositeDetector, RegexDetector, PresidioDetector, NullDetector
 
         result: Dict[str, Optional[int]] = {"regex": None, "presidio": None, "total": 0}
 
-        if isinstance(self._detector, CompositeDetector):
+        if isinstance(self._detector, NullDetector):
+            # No detectors active — total stays 0
+            return result
+        elif isinstance(self._detector, CompositeDetector):
             for det in self._detector._detectors:
                 if isinstance(det, RegexDetector):
                     result["regex"] = len(det.detect(text))
                 elif isinstance(det, PresidioDetector):
                     result["presidio"] = len(det.detect(text))
         elif isinstance(self._detector, RegexDetector):
-            result["regex"] = len(self._detector.detect(text))
+            entities = self._detector.detect(text)
+            result["regex"] = len(entities)
+            result["total"] = len(entities)
+            return result
+        elif isinstance(self._detector, PresidioDetector):
+            entities = self._detector.detect(text)
+            result["presidio"] = len(entities)
+            result["total"] = len(entities)
+            return result
 
         all_entities = self._detector.detect(text)
         result["total"] = len(all_entities)
