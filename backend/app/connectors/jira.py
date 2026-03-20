@@ -149,6 +149,102 @@ class JiraConnector(TicketConnector):
             resp.raise_for_status()
             return resp.content
 
+    async def get_available_transitions(self, ticket_id: str) -> list[dict]:
+        """Get available workflow transitions for a ticket."""
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.base_url}/rest/api/2/issue/{ticket_id}/transitions",
+                headers=self._headers,
+                auth=self._auth,
+            )
+            if not resp.is_success:
+                logger.warning("jira_transitions_fetch_failed", ticket_id=ticket_id, status_code=resp.status_code)
+                return []
+            return [
+                {"id": t["id"], "name": t.get("name", "")}
+                for t in resp.json().get("transitions", [])
+            ]
+
+    async def get_ticket_status(self, ticket_id: str) -> str:
+        """Get the current status name of a ticket."""
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.base_url}/rest/api/2/issue/{ticket_id}",
+                headers=self._headers,
+                auth=self._auth,
+                params={"fields": "status"},
+            )
+            if not resp.is_success:
+                return "Unknown"
+            return resp.json().get("fields", {}).get("status", {}).get("name", "Unknown")
+
+    async def walk_transitions_to(
+        self, ticket_id: str, target: str, max_steps: int = 5
+    ) -> tuple[bool, list[str]]:
+        """Walk through Jira transitions until reaching the target status."""
+        import httpx
+
+        DONE_KEYWORDS = ["done", "closed", "close", "resolved", "resolve", "cerrado", "cerrar", "resuelto"]
+        STATUS_KEYWORDS = {
+            "done": DONE_KEYWORDS,
+            "closed": DONE_KEYWORDS,
+            "delivered": ["delivered", "entregado", "pending", "waiting"],
+            "in_progress": ["progress", "in progress", "en curso", "working"],
+        }
+        keywords = STATUS_KEYWORDS.get(target.lower(), [target.lower()])
+        steps_taken: list[str] = []
+
+        for _ in range(max_steps):
+            current = await self.get_ticket_status(ticket_id)
+            if current.lower() in DONE_KEYWORDS and target.lower() in ("done", "closed"):
+                return True, steps_taken
+
+            transitions = await self.get_available_transitions(ticket_id)
+            if not transitions:
+                break
+
+            chosen = None
+            for t in transitions:
+                name = t["name"].lower()
+                if any(kw in name for kw in keywords):
+                    chosen = t
+                    break
+
+            if not chosen:
+                for t in transitions:
+                    name = t["name"].lower()
+                    if any(kw in name for kw in ["progress", "in progress", "en curso"]):
+                        chosen = t
+                        break
+
+            if not chosen:
+                logger.warning(
+                    "jira_walk_no_match",
+                    ticket_id=ticket_id,
+                    target=target,
+                    available=[t["name"] for t in transitions],
+                )
+                break
+
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{self.base_url}/rest/api/2/issue/{ticket_id}/transitions",
+                    headers=self._headers,
+                    auth=self._auth,
+                    json={"transition": {"id": chosen["id"]}},
+                )
+                if not resp.is_success:
+                    logger.error("jira_walk_transition_failed", ticket_id=ticket_id, transition=chosen["name"])
+                    break
+                steps_taken.append(chosen["name"])
+                logger.info("jira_walk_transition_applied", ticket_id=ticket_id, transition=chosen["name"])
+
+        final = await self.get_ticket_status(ticket_id)
+        success = final.lower() in keywords or final.lower() in DONE_KEYWORDS
+        return success, steps_taken
+
     async def delete_ticket(self, ticket_id: str) -> bool:
         logger.warning("jira_delete_ticket: not implemented for real Jira")
         return False

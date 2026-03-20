@@ -9,11 +9,12 @@ from ..config import settings
 
 logger = structlog.get_logger()
 
-# Transition IDs for KOSIN workflow
+# Transition IDs for KOSIN workflow (discovered from real API)
 TRANSITIONS = {
-    "in_progress": "11",
-    "delivered": "31",
-    "done": "31",
+    "in_progress": "161",
+    "delivered": "181",
+    "done": "191",      # "Close" -> Closed
+    "closed": "191",
 }
 
 
@@ -392,6 +393,112 @@ class KosinConnector(TicketConnector):
             error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
             logger.error("kosin_worklogs_get_failed", error=error_msg, error_type=type(e).__name__)
             return []
+
+    async def get_available_transitions(self, ticket_id: str) -> list[dict]:
+        """Get available workflow transitions for a ticket."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{self._api_base}/issue/{ticket_id}/transitions",
+                    headers=self._headers,
+                )
+                resp.raise_for_status()
+                return [
+                    {"id": t["id"], "name": t.get("name", "")}
+                    for t in resp.json().get("transitions", [])
+                ]
+        except httpx.HTTPError as e:
+            logger.error("kosin_transitions_fetch_failed", ticket=ticket_id, error=str(e))
+            return []
+
+    async def get_ticket_status(self, ticket_id: str) -> str:
+        """Get the current status name of a ticket."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{self._api_base}/issue/{ticket_id}",
+                    headers=self._headers,
+                    params={"fields": "status"},
+                )
+                resp.raise_for_status()
+                return resp.json().get("fields", {}).get("status", {}).get("name", "Unknown")
+        except httpx.HTTPError as e:
+            logger.error("kosin_status_fetch_failed", ticket=ticket_id, error=str(e))
+            return "Unknown"
+
+    async def walk_transitions_to(
+        self, ticket_id: str, target: str, max_steps: int = 5
+    ) -> tuple[bool, list[str]]:
+        """Walk through Jira transitions until the ticket reaches the target status.
+
+        Returns (success, steps_taken) where steps_taken lists the transition names applied.
+        """
+        DONE_KEYWORDS = ["done", "closed", "close", "resolved", "cerrado", "cerrar"]
+        TARGET_KEYWORDS = {
+            "done": DONE_KEYWORDS,
+            "closed": DONE_KEYWORDS,
+            "close": DONE_KEYWORDS,
+            "delivered": ["delivered", "deliver", "entregado"],
+            "in_progress": ["progress", "in progress", "en curso"],
+        }
+        keywords = TARGET_KEYWORDS.get(target.lower(), [target.lower()])
+        steps_taken: list[str] = []
+
+        for _ in range(max_steps):
+            current = await self.get_ticket_status(ticket_id)
+            if current.lower() in DONE_KEYWORDS and target.lower() in ("done", "closed", "close"):
+                logger.info("walk_transitions_already_done", ticket=ticket_id, status=current)
+                return True, steps_taken
+
+            transitions = await self.get_available_transitions(ticket_id)
+            if not transitions:
+                logger.warning("walk_transitions_no_transitions", ticket=ticket_id)
+                break
+
+            # Try to find direct match to target
+            chosen = None
+            for t in transitions:
+                name = t["name"].lower()
+                if any(kw in name for kw in keywords):
+                    chosen = t
+                    break
+
+            # If no direct match, try intermediate transitions (e.g., "in progress")
+            if not chosen:
+                for t in transitions:
+                    name = t["name"].lower()
+                    if any(kw in name for kw in ["progress", "in progress", "en curso"]):
+                        chosen = t
+                        break
+
+            if not chosen:
+                logger.warning(
+                    "walk_transitions_no_match",
+                    ticket=ticket_id,
+                    target=target,
+                    available=[t["name"] for t in transitions],
+                )
+                break
+
+            # Apply the transition
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        f"{self._api_base}/issue/{ticket_id}/transitions",
+                        headers=self._headers,
+                        json={"transition": {"id": chosen["id"]}},
+                    )
+                    resp.raise_for_status()
+                    steps_taken.append(chosen["name"])
+                    logger.info("walk_transition_applied", ticket=ticket_id, transition=chosen["name"])
+            except httpx.HTTPError as e:
+                logger.error("walk_transition_failed", ticket=ticket_id, transition=chosen["name"], error=str(e))
+                break
+
+        # Check final status
+        final = await self.get_ticket_status(ticket_id)
+        success = final.lower() in [k for kws in [keywords, DONE_KEYWORDS] for k in kws]
+        return success, steps_taken
 
     async def delete_worklog(self, ticket_id: str, worklog_id: str) -> bool:
         """Delete a worklog entry from a KOSIN ticket."""

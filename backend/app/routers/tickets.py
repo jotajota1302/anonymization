@@ -527,6 +527,211 @@ async def sync_to_client(ticket_id: int, body: SyncToClientRequest):
     return {"message": f"Comentario sincronizado con {source_ticket_id}", "success": True}
 
 
+@router.post("/{ticket_id}/finalize-destination")
+async def finalize_destination(ticket_id: int, client_id: Optional[str] = Query(None)):
+    """Close the destination (anonymized) ticket in KOSIN by walking Jira transitions."""
+    state = _get_state()
+    db = state["db"]
+    destination = state.get("destination_connector")
+    ws_manager = state.get("ws_manager")
+
+    if not destination:
+        raise HTTPException(status_code=503, detail="No hay conector destino configurado")
+
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if ticket["status"] in ("resolved", "closed"):
+        raise HTTPException(status_code=409, detail="El ticket ya esta finalizado o cerrado")
+
+    dest_key = ticket["kosin_ticket_id"]
+
+    async def _progress(step: str, detail: str = ""):
+        if not (client_id and ws_manager and ws_manager.is_connected(client_id)):
+            return
+        await ws_manager.send_message(client_id, {
+            "type": "finalize_progress",
+            "data": {"step": step, "detail": detail, "ticket_id": ticket_id},
+        })
+
+    await _progress("starting", f"Finalizando destino {dest_key}")
+
+    # Try walk_transitions_to first
+    success = False
+    steps_taken = []
+    try:
+        success, steps_taken = await destination.walk_transitions_to(dest_key, "done")
+        await _progress("transitions", f"Transiciones aplicadas: {', '.join(steps_taken) if steps_taken else 'ninguna'}")
+    except Exception as e:
+        logger.warning("finalize_walk_failed", dest_key=dest_key, error=str(e))
+
+    # Fallback to update_status if walk didn't succeed
+    if not success:
+        try:
+            success = await destination.update_status(dest_key, "done")
+            if success:
+                steps_taken.append("fallback:update_status")
+        except Exception as e:
+            logger.warning("finalize_fallback_failed", dest_key=dest_key, error=str(e))
+
+    if not success:
+        await _progress("error", "No se pudo transicionar el ticket destino a Done")
+        raise HTTPException(
+            status_code=502,
+            detail=f"No se pudo cerrar el ticket destino {dest_key}. "
+                   f"Transiciones intentadas: {steps_taken or 'ninguna'}. "
+                   f"Verifica el workflow en KOSIN.",
+        )
+
+    # Update local DB
+    await db.update_ticket_status(ticket_id, "resolved")
+
+    await db.add_audit_log(
+        operator_id="operator",
+        action="finalize_destination",
+        ticket_mapping_id=ticket_id,
+        details=f"dest={dest_key}, transitions={steps_taken}",
+    )
+
+    await _progress("completed", f"Destino {dest_key} finalizado")
+    logger.info("finalize_destination_ok", ticket_id=ticket_id, dest_key=dest_key, steps=steps_taken)
+
+    return {
+        "success": True,
+        "message": f"Ticket destino {dest_key} finalizado correctamente",
+        "dest_key": dest_key,
+        "transition_steps": steps_taken,
+    }
+
+
+@router.post("/{ticket_id}/sync-and-close-source")
+async def sync_and_close_source(ticket_id: int, client_id: Optional[str] = Query(None)):
+    """Publish resolution to source ticket and close it."""
+    state = _get_state()
+    db = state["db"]
+    anonymizer = state["anonymizer"]
+    ws_manager = state.get("ws_manager")
+
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if ticket["status"] != "resolved":
+        raise HTTPException(
+            status_code=409,
+            detail="El ticket destino debe estar finalizado (resolved) antes de sincronizar con origen",
+        )
+
+    source_ticket_id = ticket["source_ticket_id"]
+
+    async def _progress(step: str, detail: str = ""):
+        if not (client_id and ws_manager and ws_manager.is_connected(client_id)):
+            return
+        await ws_manager.send_message(client_id, {
+            "type": "sync_progress",
+            "data": {"step": step, "detail": detail, "ticket_id": ticket_id},
+        })
+
+    await _progress("starting", f"Sincronizando con origen {source_ticket_id}")
+
+    # Resolve source connector
+    connector_router = state.get("connector_router")
+    if connector_router:
+        try:
+            _, source_connector = connector_router.get_connector(source_ticket_id)
+        except ValueError:
+            source_connector = state["jira_connector"]
+    else:
+        source_connector = state["jira_connector"]
+
+    # Get last agent message as resolution summary
+    chat_history = await db.get_chat_history(ticket_id)
+    agent_msgs = [m for m in chat_history if m["role"] == "agent"]
+    if not agent_msgs:
+        raise HTTPException(status_code=400, detail="No hay mensajes del agente para usar como resolucion")
+
+    import re
+    resolution = agent_msgs[-1]["message"]
+    resolution = re.sub(r"\[CHIPS[:\s].*?\]", "", resolution, flags=re.DOTALL).strip()
+
+    await _progress("deanonymizing", "De-anonimizando resolucion")
+
+    # Reconstruct substitution map from source
+    try:
+        source_ticket = await source_connector.get_ticket(source_ticket_id)
+        comments = await source_connector.get_comments(source_ticket_id)
+        full_text = Anonymizer.assemble_ingest_text(
+            source_ticket.get("summary", ""),
+            source_ticket.get("description", "") or "",
+            comments,
+        )
+        sub_map = anonymizer.reconstruct_map(full_text)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"No se pudo reconstruir el mapa desde el origen: {str(e)}",
+        )
+
+    # De-anonymize
+    real_comment = Anonymizer.de_anonymize(resolution, sub_map)
+    comment_text = f"[RESOLUCION] {real_comment}"
+
+    # Publish to source
+    await _progress("publishing", f"Publicando resolucion en {source_ticket_id}")
+    pub_success = await source_connector.add_comment(source_ticket_id, comment_text)
+    if not pub_success:
+        raise HTTPException(status_code=502, detail="Error publicando comentario de resolucion en origen")
+
+    # Try to close source ticket (warning only if fails)
+    await _progress("closing_source", f"Cerrando ticket origen {source_ticket_id}")
+    source_closed = False
+    source_steps = []
+    try:
+        source_closed, source_steps = await source_connector.walk_transitions_to(source_ticket_id, "done")
+    except Exception as e:
+        logger.warning("sync_source_walk_failed", source=source_ticket_id, error=str(e))
+
+    if not source_closed:
+        try:
+            source_closed = await source_connector.update_status(source_ticket_id, "done")
+            if source_closed:
+                source_steps.append("fallback:update_status")
+        except Exception as e:
+            logger.warning("sync_source_fallback_failed", source=source_ticket_id, error=str(e))
+
+    # Update local DB to closed
+    await db.update_ticket_status(ticket_id, "closed")
+
+    # Invalidate agent cache
+    agent = state.get("agent")
+    if agent:
+        agent.invalidate_map_cache(ticket_id)
+
+    await db.add_audit_log(
+        operator_id="operator",
+        action="sync_and_close_source",
+        ticket_mapping_id=ticket_id,
+        details=f"source={source_ticket_id}, source_closed={source_closed}, steps={source_steps}",
+    )
+
+    await _progress("completed", f"Origen {source_ticket_id} sincronizado y {'cerrado' if source_closed else 'comentario publicado (transicion manual requerida)'}")
+    logger.info("sync_and_close_source_ok", ticket_id=ticket_id, source=source_ticket_id, source_closed=source_closed)
+
+    warning = None if source_closed else (
+        f"La resolucion se publico en {source_ticket_id} pero no se pudo transicionar a Done automaticamente. "
+        f"Cierra el ticket origen manualmente."
+    )
+
+    return {
+        "success": True,
+        "message": f"Resolucion sincronizada con {source_ticket_id}" + (" y cerrado" if source_closed else ""),
+        "source_key": source_ticket_id,
+        "source_closed": source_closed,
+        "warning": warning,
+    }
+
+
 @router.post("/{ticket_id}/destination-comment")
 async def add_destination_comment(ticket_id: int, body: dict):
     """Register an action as a comment in the destination (VOLCADO) ticket."""

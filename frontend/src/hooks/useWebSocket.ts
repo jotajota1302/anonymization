@@ -101,6 +101,11 @@ export function useWebSocket(clientId: string) {
             setIngestProgress(msg.data);
             break;
 
+          case "finalize_progress":
+          case "sync_progress":
+            // Progress updates for finalize/sync operations — handled by toast in page.tsx
+            break;
+
           case "info":
             // Info messages (e.g., tool execution status)
             break;

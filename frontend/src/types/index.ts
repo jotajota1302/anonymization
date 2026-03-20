@@ -39,7 +39,8 @@ export interface IngestStep {
 
 export type WSMessage =
   | { type: "token" | "complete" | "error" | "info"; data: string; ticket_id: number | null }
-  | { type: "ingest_progress"; data: IngestStep; ticket_id: number | null };
+  | { type: "ingest_progress"; data: IngestStep; ticket_id: number | null }
+  | { type: "finalize_progress" | "sync_progress"; data: Record<string, unknown>; ticket_id: number | null };
 
 export interface BoardTicket {
   key: string;

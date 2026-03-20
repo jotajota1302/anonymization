@@ -67,22 +67,41 @@ const IconExternalLink = () => (
   </svg>
 );
 
+const IconCheck = ({ size = 16, className = "" }: { size?: number; className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
+);
+const IconSyncLock = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+    <rect x="14" y="17" width="7" height="5" rx="1"/><path d="M16 17v-1a1.5 1.5 0 0 1 3 0v1"/>
+  </svg>
+);
+const IconSpinner = ({ className = "" }: { className?: string }) => (
+  <svg className={`animate-spin w-4 h-4 ${className}`} viewBox="0 0 24 24" fill="none">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+  </svg>
+);
+
 interface Props {
   ticketId: number | null;
   boardTicket: BoardTicket | null;
   onSendMessage: (message: string, isChip?: boolean) => void;
-  onFinishTicket: () => void;
-  onSyncToClient: (comment: string) => void;
-  onCloseTicket: () => void;
+  onFinalizeDestination: () => void;
+  onSyncComment: (comment: string) => void;
+  onSyncAndCloseSource: () => void;
   onConfirmIngest: (key: string) => void;
 }
 
-export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket, onSyncToClient, onCloseTicket, onConfirmIngest }: Props) {
+export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDestination, onSyncComment, onSyncAndCloseSource, onConfirmIngest }: Props) {
   const [input, setInput] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { chatMessages, isStreaming, isIngesting, tickets, suggestedChips, piiWarnings } = useAppStore();
+  const { chatMessages, isStreaming, isIngesting, tickets, suggestedChips, piiWarnings, isFinalizing, isSyncingSource } = useAppStore();
   const messages = ticketId ? chatMessages[ticketId] || [] : [];
   const ticket = tickets.find((t) => t.id === ticketId);
 
@@ -318,7 +337,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
               <IconClip />
             </button>
           </div>
-          <div className="flex gap-3" role="group" aria-label="Acciones del ticket">
+          <div className="flex gap-3 items-center" role="group" aria-label="Acciones del ticket">
             {ticket && ticket.status !== "resolved" && ticket.status !== "closed" && (
               <>
                 <button
@@ -329,26 +348,43 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
                     const comment = lastAgent.content.replace(/\[CHIPS[:\s].*?\]/gs, "").trim();
                     if (!comment) return;
                     setIsSyncing(true);
-                    onSyncToClient(comment);
+                    onSyncComment(comment);
                     setTimeout(() => setIsSyncing(false), 2000);
                   }}
                   disabled={isSyncing}
+                  title="Enviar ultimo comentario del agente al ticket origen"
                   className="flex items-center gap-2 px-4 py-2 bg-teal-500 text-white rounded-lg text-sm font-bold hover:bg-teal-600 transition-colors shadow-lg shadow-teal-500/20 disabled:opacity-50">
                   <IconSync />
-                  {isSyncing ? "Sincronizando..." : "Sincronizar con origen"}
+                  {isSyncing ? "Sincronizando..." : "Sincronizar comentario"}
                 </button>
-<button onClick={onFinishTicket}
-                  className="flex items-center gap-2 px-4 py-2 border-2 border-primary text-primary rounded-lg text-sm font-bold hover:bg-primary hover:text-white transition-all">
-                  Finalizar ticket
+                <button onClick={onFinalizeDestination}
+                  disabled={isFinalizing}
+                  title="Cierra el ticket anonimizado en KOSIN"
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-blue-600 transition-all shadow-lg shadow-primary/20 disabled:opacity-50">
+                  {isFinalizing ? <IconSpinner /> : <IconCheck />}
+                  {isFinalizing ? "Finalizando..." : "Finalizar destino"}
                 </button>
               </>
             )}
             {ticket && ticket.status === "resolved" && (
-              <button onClick={onCloseTicket}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-bold hover:bg-red-600 transition-colors shadow-lg shadow-red-500/20">
-                <IconLock size={16} className="text-white" />
-                Cerrar ticket
-              </button>
+              <>
+                <span className="flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs font-bold rounded-lg">
+                  <IconCheck size={14} />
+                  Destino finalizado
+                </span>
+                <button onClick={onSyncAndCloseSource}
+                  disabled={isSyncingSource}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-bold hover:bg-orange-600 transition-colors shadow-lg shadow-orange-500/20 disabled:opacity-50">
+                  {isSyncingSource ? <IconSpinner /> : <IconSyncLock />}
+                  {isSyncingSource ? "Sincronizando..." : "Sincronizar y cerrar origen"}
+                </button>
+              </>
+            )}
+            {ticket && ticket.status === "closed" && (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-xs font-bold rounded-lg">
+                <IconLock size={14} />
+                Ticket cerrado
+              </span>
             )}
           </div>
         </div>

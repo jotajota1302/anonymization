@@ -76,3 +76,11 @@ class TicketConnector(ABC):
     async def delete_worklog(self, ticket_id: str, worklog_id: str) -> bool:
         """Delete a worklog entry. Returns True on success."""
         raise NotImplementedError(f"{type(self).__name__} does not support delete_worklog")
+
+    async def get_available_transitions(self, ticket_id: str) -> List[Dict]:
+        """Get available workflow transitions for a ticket. Returns list of {id, name}."""
+        raise NotImplementedError(f"{type(self).__name__} does not support get_available_transitions")
+
+    async def get_ticket_status(self, ticket_id: str) -> str:
+        """Get the current status name of a ticket in the remote system."""
+        raise NotImplementedError(f"{type(self).__name__} does not support get_ticket_status")

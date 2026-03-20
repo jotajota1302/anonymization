@@ -212,19 +212,30 @@ export default function Home() {
     [selectedTicketId, sendMessage]
   );
 
-  const handleFinishTicket = useCallback(async () => {
+  const { setIsFinalizing, setIsSyncingSource } = useAppStore();
+
+  const handleFinalizeDestination = useCallback(async () => {
     if (!selectedTicketId) return;
+    setIsFinalizing(true);
     try {
-      await fetch(`${API_URL}/api/tickets/${selectedTicketId}/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "resolved" }),
-      });
-      fetchTickets();
+      const res = await fetch(
+        `${API_URL}/api/tickets/${selectedTicketId}/finalize-destination?client_id=${encodeURIComponent(clientId)}`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        showToast(data.message, "success");
+        fetchTickets();
+      } else {
+        const err = await res.json();
+        showToast(`Error al finalizar destino: ${err.detail || "Error desconocido"}`);
+      }
     } catch (err) {
-      console.error("Failed to finish ticket:", err);
+      showToast("Error de red al finalizar destino");
+    } finally {
+      setIsFinalizing(false);
     }
-  }, [selectedTicketId, fetchTickets]);
+  }, [selectedTicketId, fetchTickets, clientId, showToast, setIsFinalizing]);
 
   const handleSyncToClient = useCallback(
     async (comment: string) => {
@@ -246,28 +257,40 @@ export default function Home() {
     [selectedTicketId]
   );
 
-  const doCloseTicket = useCallback(async () => {
+  const doSyncAndCloseSource = useCallback(async () => {
     if (!selectedTicketId) return;
+    setIsSyncingSource(true);
     try {
-      await fetch(`${API_URL}/api/tickets/${selectedTicketId}/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "closed" }),
-      });
-      fetchTickets();
+      const res = await fetch(
+        `${API_URL}/api/tickets/${selectedTicketId}/sync-and-close-source?client_id=${encodeURIComponent(clientId)}`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        showToast(data.message, "success");
+        if (data.warning) {
+          setTimeout(() => showToast(data.warning, "warning"), 1500);
+        }
+        fetchTickets();
+      } else {
+        const err = await res.json();
+        showToast(`Error al sincronizar con origen: ${err.detail || "Error desconocido"}`);
+      }
     } catch (err) {
-      console.error("Failed to close ticket:", err);
+      showToast("Error de red al sincronizar con origen");
+    } finally {
+      setIsSyncingSource(false);
     }
-  }, [selectedTicketId, fetchTickets]);
+  }, [selectedTicketId, fetchTickets, clientId, showToast, setIsSyncingSource]);
 
-  const handleCloseTicket = useCallback(() => {
+  const handleSyncAndCloseSource = useCallback(() => {
     if (!selectedTicketId) return;
     setConfirmModal({
-      title: "Cerrar ticket definitivamente",
-      message: "El ticket se cerrara definitivamente y no se podra reabrir. Esta accion no se puede deshacer.",
-      onConfirm: () => { doCloseTicket(); setConfirmModal(null); },
+      title: "Sincronizar y cerrar origen",
+      message: "Se publicara la resolucion en el ticket origen y se cerrara definitivamente. Esta accion no se puede deshacer.",
+      onConfirm: () => { doSyncAndCloseSource(); setConfirmModal(null); },
     });
-  }, [selectedTicketId, doCloseTicket]);
+  }, [selectedTicketId, doSyncAndCloseSource]);
 
   const selectedBoardTicket = selectedBoardKey
     ? boardTickets.find((bt) => bt.key === selectedBoardKey) || null
@@ -326,8 +349,8 @@ export default function Home() {
         <section id="main-content" className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-900">
           <ChatPanel
             ticketId={selectedTicketId} boardTicket={selectedBoardTicket}
-            onSendMessage={handleSendMessage} onFinishTicket={handleFinishTicket}
-            onSyncToClient={handleSyncToClient} onCloseTicket={handleCloseTicket}
+            onSendMessage={handleSendMessage} onFinalizeDestination={handleFinalizeDestination}
+            onSyncComment={handleSyncToClient} onSyncAndCloseSource={handleSyncAndCloseSource}
             onConfirmIngest={handleConfirmIngest}
           />
         </section>

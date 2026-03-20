@@ -1,10 +1,10 @@
 # Propuesta de Arquitectura: Plataforma de Anonimizacion de Ticketing
 
-**Version:** 1.8
+**Version:** 1.9
 **Fecha original:** 13 de Marzo de 2026
-**Ultima actualizacion:** 19 de Marzo de 2026
+**Ultima actualizacion:** 20 de Marzo de 2026
 **Equipo:** NTT DATA EMEAL
-**Estado:** Piloto implementado con Presidio NLP configurable desde UI, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional (integraciones + anonimizacion + admin tickets), renderizado Markdown en chat, notificaciones toast/modal, soporte tri-provider LLM (Ollama/OpenAI/Azure), test de conexion LLM desde UI, guia de despliegue Azure completa, 56 tests, **arquitectura dual-agent** (LLM anonimizacion + LLM resolucion), **filtros de origen con JQL dinamico**, **buscador en pendientes**, **eliminacion de datos PII de BBDD** (mapa sustitucion reconstruido on-the-fly), **LLM detector adaptativo** (modo full/names-only segun detectores activos), **reconstruccion de mapa inmutable** (siempre usa CompositeDetector), **proteccion anti-re-tokenizacion** (tokens existentes no se re-procesan) — pendiente validacion (Fase 4)
+**Estado:** Piloto implementado con Presidio NLP configurable desde UI, multi-cliente (Remedy/ServiceNow), redaccion de imagenes, panel de configuracion funcional (integraciones + anonimizacion + admin tickets), renderizado Markdown en chat, notificaciones toast/modal, soporte tri-provider LLM (Ollama/OpenAI/Azure), test de conexion LLM desde UI, guia de despliegue Azure completa, 56 tests, **arquitectura dual-agent** (LLM anonimizacion + LLM resolucion), **filtros de origen con JQL dinamico**, **buscador en pendientes**, **eliminacion de datos PII de BBDD** (mapa sustitucion reconstruido on-the-fly), **LLM detector adaptativo** (modo full/names-only segun detectores activos), **reconstruccion de mapa inmutable** (siempre usa CompositeDetector), **proteccion anti-re-tokenizacion** (tokens existentes no se re-procesan), **gestion de estados Jira real** (walk_transitions para cerrar tickets destino y origen via API) — pendiente validacion (Fase 4)
 
 ---
 
@@ -158,11 +158,12 @@ flowchart TB
     CHAT --> CHIPS
     CHIPS -->|"18. Click\nen chip"| CHAT
 
-    %% === FLUJO 3: CIERRE ===
+    %% === FLUJO 3: CIERRE (v1.9 — transiciones Jira reales) ===
     SYNC_BTN -->|"19. POST /sync-to-client\nDe-anonimizar comentario"| DEANON
     DEANON -->|"20. Comentario\ncon datos reales"| KOSIN_SRC
-    CLOSE_BTN -->|"21. PUT /status → closed"| DESTROY
-    DESTROY -->|"22. DELETE\nmapa sustitucion"| DB
+    CLOSE_BTN -->|"21a. POST /finalize-destination\nwalk_transitions → Closed"| ANON_TICKET
+    CLOSE_BTN -->|"21b. POST /sync-and-close-source\nDe-anonimizar + walk_transitions"| DEANON
+    DEANON -->|"22. Comentario resolucion\n+ transicion → Closed"| KOSIN_SRC
 
     %% === ESTILOS ===
     classDef sourceStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
@@ -220,7 +221,7 @@ mediante herramientas controladas y auditadas.
 │  │  Tickets ya        │  │  - Preguntar sobre el ticket     │   │
 │  │  anonimizados e    │  │  - Dar instrucciones al agente   │   │
 │  │  ingestados.       │  │  - Usar chips de accion sugerida │   │
-│  │                    │  │  - Finalizar ticket               │   │
+│  │                    │  │  - Finalizar destino / Cerrar orig│   │
 │  │  Cada ticket:      │  │                                   │   │
 │  │  - ID KOSIN        │  │  Chips de accion sugerida:       │   │
 │  │  - Resumen anonim. │  │  Botones clickeables que el      │   │
@@ -378,40 +379,71 @@ AGENTE: (execute_action: restart_service — simulado en piloto)
   [CHIPS: "Confirmar resolucion", "Verificar estado", "Ver logs"]
               │
               ▼
-OPERADOR: Click en "Finalizar ticket"
+OPERADOR: Click en "Finalizar destino"
               │
               ▼
-AGENTE: Registra resolucion en KOSIN (anonimizado)
-PUT /api/tickets/{id}/status → closed
-Se destruye el mapa de sustitucion
+POST /api/tickets/{id}/finalize-destination
+   → walk_transitions_to(dest_key, "done") — ticket KOSIN anonimizado → Closed
+   → DB local: status = "resolved"
+              │
+              ▼
+OPERADOR: Click en "Sincronizar y cerrar origen"
+              │
+              ▼
+POST /api/tickets/{id}/sync-and-close-source
+   → De-anonimiza resolucion, publica en origen, transiciona a Closed
+   → DB local: status = "closed", invalida cache
 ```
 
-### 3.3 Cierre y Volcado a Cliente — Implementado
+### 3.3 Cierre y Volcado a Cliente — Implementado (v1.9: transiciones Jira reales)
 
 ```
-1. Operador hace click en "Sincronizar con origen"
-   → Toma ultimo mensaje del agente como comentario de resolucion
+DURANTE EL TRABAJO (sync parcial de comentarios):
+1. Operador hace click en "Sincronizar comentario"
+   → Toma ultimo mensaje del agente como comentario
    → POST /api/tickets/{id}/sync-to-client
+   → Backend reconstruye mapa, de-anonimiza, publica en ticket origen
+   → El ticket sigue abierto en ambos sistemas
+
+FINALIZAR DESTINO (cierre del ticket anonimizado):
+2. Operador hace click en "Finalizar destino"
+   → POST /api/tickets/{id}/finalize-destination
               │
               ▼
-2. Backend carga y descifra el mapa de sustitucion
-   → Anonymizer.de_anonymize(comment, sub_map) reemplaza tokens por datos reales
-   → jira_connector.add_comment(source_ticket_id, real_comment)
-   → Comentario de-anonimizado publicado en ticket origen
-              │
-              ▼
-3. Operador marca ticket como "Finalizar ticket" → status = "resolved"
-   (el mapa de sustitucion se MANTIENE para permitir mas sincronizaciones)
-              │
-              ▼
-4. Operador hace click en "Cerrar ticket" (solo visible en status resolved)
+   Backend ejecuta walk_transitions_to(dest_key, "done"):
+   → GET /issue/{id}/transitions — consulta transiciones disponibles
+   → Busca match por keywords ("close", "done", "closed", "resolved")
+   → POST /issue/{id}/transitions — aplica transicion
+   → Si no hay match directo, intenta transiciones intermedias ("in progress")
+   → Repite hasta llegar a Closed (max 5 pasos)
+   → Fallback: update_status() con IDs hardcodeados si walk falla
+   → DB local: status = "resolved"
+   → Audit log: finalize_destination
+
+SINCRONIZAR Y CERRAR ORIGEN:
+3. Operador hace click en "Sincronizar y cerrar origen" (solo visible en status resolved)
    → Dialogo de confirmacion (accion irreversible)
-   → PUT /api/tickets/{id}/status → "closed"
-   → Se destruye el mapa de sustitucion (delete_substitution_map)
-   → closed_at registrado
+   → POST /api/tickets/{id}/sync-and-close-source
+              │
+              ▼
+   Backend:
+   → Extrae ultimo mensaje del agente como resumen de resolucion
+   → Limpia marcadores [CHIPS...] del resumen
+   → Reconstruye mapa de sustitucion desde ticket origen
+   → De-anonimiza el resumen
+   → Publica comentario "[RESOLUCION] {real_comment}" en ticket origen
+   → walk_transitions_to(source_key, "done") — cierra ticket origen
+   → Si transicion falla: warning (no bloquea, el comentario ya se publico)
+   → DB local: status = "closed", invalida cache del agente
+   → Audit log: sync_and_close_source
+
+BOTONES EN UI (por estado):
+   open/in_progress:  [Sincronizar comentario] [Finalizar destino]
+   resolved:          [✓ Destino finalizado]   [Sincronizar y cerrar origen]
+   closed:            [🔒 Ticket cerrado]       (sin botones)
 
 ⚠️  PENDIENTE:
-5. Confirmacion de supervisor onshore no implementada
+4. Confirmacion de supervisor onshore no implementada
 ```
 
 ---
@@ -698,6 +730,11 @@ class TicketConnector(ABC):
     async def add_comment(self, ticket_id: str, comment: str) -> bool
     async def create_ticket(self, summary: str, description: str,
                             priority: str, ...) -> Optional[str]
+    # Opcionales (v1.9):
+    async def get_available_transitions(self, ticket_id: str) -> List[Dict]
+    async def get_ticket_status(self, ticket_id: str) -> str
+    async def walk_transitions_to(self, ticket_id: str, target: str,
+                                   max_steps: int = 5) -> tuple[bool, list[str]]
 ```
 
 **Diferencias con propuesta v1.0:**
@@ -712,7 +749,8 @@ class TicketConnector(ABC):
   para consultar el board via JQL. Bearer token auth.
 - `MockKosinConnector`: Mock en memoria para desarrollo sin acceso a KOSIN real.
 - `JiraConnector`: Conector real para Jira externo via httpx (Basic Auth email+token).
-  `update_status` y `create_ticket` no implementados (solo lectura).
+  `update_status` con keyword matching dinamico, `walk_transitions_to` para recorrer workflows.
+  `create_ticket` no implementado (solo lectura + transiciones).
 - `MockJiraConnector`: 5 tickets hardcodeados con PII de seguros (contexto espanol).
 - `MockRemedyConnector`: 4 tickets ITSM (INC, CHG, PRB) con PII realista de seguros.
 - `MockServiceNowConnector`: 3 tickets ServiceNow (SNOW-) con PII realista.
@@ -976,7 +1014,7 @@ como funcionalidad del sistema. No hay mecanismo automatico de bloqueo ni deriva
 │                  │                                           │
 │                  │  [Escribe tu mensaje...        ] [Enviar] │
 │                  │                                           │
-│                  │  [Finalizar ticket]                       │
+│                  │  [Sync comentario] [Finalizar destino]    │
 └──────────────────┴───────────────────────────────────────────┘
 ```
 
@@ -1306,6 +1344,7 @@ KOSIN como repositorio interno anonimizado, y un catalogo cerrado de acciones te
 - **LLM detector adaptativo** (v1.8): `llm_detect_pii` opera en dos modos — `names_only` cuando regex/Presidio estan activos (busca solo nombres) y `full` cuando estan desactivados (busca TODOS los tipos de PII: personas, emails, telefonos, DNI, IBAN, direcciones, etc.). Esto permite al LLM actuar como detector primario cuando no hay barreras automaticas
 - **Reconstruccion de mapa inmutable** (v1.8): `_get_substitution_map` siempre usa un `CompositeDetector` temporal para reconstruir el mapa de sustitucion, independientemente del detector activo. Esto soluciona el bug donde cambiar el detector despues de ingestar producia mapas vacios y tokens `[TIPO_REDACTED]` en el chat
 - **Proteccion anti-re-tokenizacion** (v1.8): el `AnonymizationLLM.filter_text()` ahora detecta y omite tokens de anonimizacion existentes (formato `[TIPO_N]` o `[TIPO_REDACTED]`) para evitar que se re-procesen como PII. Prompt del agente de anonimizacion mejorado con lista ampliada de falsos positivos (terminologia SAP, frases genericas de procedimiento, terminos ITSM)
+- **Gestion de estados Jira real** (v1.9): los botones de cierre ahora ejecutan transiciones reales en Jira/KOSIN via API REST v2. Nuevos metodos `get_available_transitions()`, `get_ticket_status()` y `walk_transitions_to()` en la interfaz de conectores. `walk_transitions_to` consulta transiciones disponibles dinamicamente, busca por keywords ("close", "done", "resolved") y recorre estados intermedios si es necesario (max 5 pasos). Flujo secuencial: "Finalizar destino" (cierra ticket anonimizado, DB → resolved) → "Sincronizar y cerrar origen" (publica resolucion de-anonimizada + cierra ticket origen, DB → closed). IDs de transicion KOSIN corregidos a los reales (161=In Progress, 181=Deliver, 191=Close). UI rediseñada con botones contextuales por estado y spinners de progreso
 
 **Principales elementos pendientes:**
 - Autenticacion de operadores (JWT/SSO)

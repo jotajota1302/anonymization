@@ -32,6 +32,8 @@ interface AppState {
   ingestProgress: IngestStep | null;
   isLoadingBoard: boolean;
   isLoadingTickets: boolean;
+  isFinalizing: boolean;
+  isSyncingSource: boolean;
   piiWarnings: Record<number, string>;
   suggestedChips: string[];
   boardFilters: BoardFilters;
@@ -52,6 +54,8 @@ interface AppState {
   setIngestProgress: (step: IngestStep | null) => void;
   setIsLoadingBoard: (val: boolean) => void;
   setIsLoadingTickets: (val: boolean) => void;
+  setIsFinalizing: (val: boolean) => void;
+  setIsSyncingSource: (val: boolean) => void;
   setPiiWarning: (ticketId: number, warning: string) => void;
   setSuggestedChips: (chips: string[]) => void;
   updateTicketStatus: (ticketId: number, status: TicketSummary["status"]) => void;
@@ -70,6 +74,8 @@ export const useAppStore = create<AppState>((set) => ({
   ingestProgress: null,
   isLoadingBoard: true,
   isLoadingTickets: true,
+  isFinalizing: false,
+  isSyncingSource: false,
   piiWarnings: {},
   suggestedChips: [],
   boardFilters: { ...DEFAULT_BOARD_FILTERS },
@@ -125,6 +131,10 @@ export const useAppStore = create<AppState>((set) => ({
   setIsLoadingBoard: (val) => set({ isLoadingBoard: val }),
 
   setIsLoadingTickets: (val) => set({ isLoadingTickets: val }),
+
+  setIsFinalizing: (val) => set({ isFinalizing: val }),
+
+  setIsSyncingSource: (val) => set({ isSyncingSource: val }),
 
   setPiiWarning: (ticketId, warning) =>
     set((state) => ({
