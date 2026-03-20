@@ -56,6 +56,11 @@ async def _init_detector(db):
         detector_type = settings.pii_detector.lower()
         presidio_cfg = {}
 
+    if detector_type == "none":
+        from .services.detection import NullDetector
+        logger.info("pii_detector_initialized", type="none", source="db" if anon_config else "env")
+        return NullDetector()
+
     if detector_type == "regex":
         from .services.detection import RegexDetector
         logger.info("pii_detector_initialized", type="regex", source="db" if anon_config else "env")

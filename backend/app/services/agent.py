@@ -545,6 +545,10 @@ class AnonymizationAgent:
         sub_map = await self._get_substitution_map(ticket_id)
         ticket = await self.db.get_ticket(ticket_id)
 
+        # Expose sub_map in app_state so tools (read_ticket, etc.) can apply it
+        from ..main import app_state
+        app_state["active_sub_map"] = sub_map
+
         # 2. PRE-filter: anonymize user input (regex + optional LLM)
         filtered_message = self.anonymizer.filter_output(user_message, sub_map)
         if self.anon_llm:

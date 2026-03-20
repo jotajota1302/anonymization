@@ -299,6 +299,13 @@ class PresidioDetector(DetectionService):
         return entities
 
 
+class NullDetector(DetectionService):
+    """No-op detector — detects nothing. Use when only the LLM layer should run."""
+
+    def detect(self, text: str) -> List[PiiEntity]:
+        return []
+
+
 class CompositeDetector(DetectionService):
     """Combines multiple detectors, deduplicating overlapping results.
 

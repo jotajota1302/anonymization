@@ -1330,7 +1330,7 @@ export default function ConfigPage() {
                                   <button type="button"
                                     onClick={() => {
                                       if (isRegexActive && isPresidioActive) setDetectorType("presidio");
-                                      else if (isRegexActive) setDetectorType("presidio");
+                                      else if (isRegexActive) setDetectorType(isPresidioActive ? "presidio" : "none");
                                       else if (isPresidioActive) setDetectorType("composite");
                                       else setDetectorType("regex");
                                     }}
@@ -1381,8 +1381,8 @@ export default function ConfigPage() {
                                   <button type="button"
                                     onClick={() => {
                                       if (!presidioAvailable) return;
-                                      if (isPresidioActive) setDetectorType("regex");
-                                      else setDetectorType("composite");
+                                      if (isPresidioActive) setDetectorType(isRegexActive ? "regex" : "none");
+                                      else setDetectorType(isRegexActive ? "composite" : "presidio");
                                     }}
                                     disabled={!presidioAvailable}
                                     className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-4 ${!presidioAvailable ? "bg-slate-200 dark:bg-slate-700 cursor-not-allowed" : isPresidioActive ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}

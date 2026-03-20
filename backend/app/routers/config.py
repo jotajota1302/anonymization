@@ -649,6 +649,8 @@ async def get_anonymization_settings():
             active_detector = "presidio"
         elif "Regex" in cls_name:
             active_detector = "regex"
+        elif "Null" in cls_name:
+            active_detector = "none"
 
     # Check if presidio is available
     presidio_available = False
@@ -687,8 +689,8 @@ async def update_anonymization_settings(body: AnonymizationUpdate):
     config = await _get_anon_config(db)
 
     if body.detector_type is not None:
-        if body.detector_type not in ("regex", "presidio", "composite"):
-            raise HTTPException(status_code=400, detail="detector_type must be 'regex', 'presidio', or 'composite'")
+        if body.detector_type not in ("regex", "presidio", "composite", "none"):
+            raise HTTPException(status_code=400, detail="detector_type must be 'regex', 'presidio', 'composite', or 'none'")
         config["detector_type"] = body.detector_type
 
     if body.sensitivity is not None:
@@ -757,7 +759,10 @@ async def update_anonymization_settings(body: AnonymizationUpdate):
 
 def _create_detector(detector_type: str, presidio_config: dict = None):
     """Create a new detector instance by type, passing Presidio config if applicable."""
-    if detector_type == "regex":
+    if detector_type == "none":
+        from ..services.detection import NullDetector
+        return NullDetector()
+    elif detector_type == "regex":
         from ..services.detection import RegexDetector
         return RegexDetector()
     elif detector_type == "presidio":

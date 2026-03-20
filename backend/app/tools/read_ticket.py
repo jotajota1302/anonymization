@@ -43,6 +43,11 @@ async def read_ticket(ticket_id: str) -> str:
             for c in comments:
                 result += f"- [{c.get('author', 'unknown')}]: {c['body']}\n"
 
+        # Apply active substitution map so the agent only ever sees anonymized content
+        sub_map = app_state.get("active_sub_map", {})
+        if sub_map:
+            result = anonymizer.filter_output(result, sub_map)
+
         return result
     except Exception as e:
         return f"Error al leer ticket {ticket_id}: {str(e)}"
