@@ -118,10 +118,12 @@ class Anonymizer:
                     entity_type=token.split("_")[0].strip("["),
                 )
 
-        # Also run regex detection on the output as extra safety
-        entities = self.detect_pii(filtered)
-        for entity in reversed(entities):
-            # Check if this is a known value
+        # Second pass: regex-only detection for structured PII (DNI, email, phone…)
+        # Never use NER/Presidio here — it causes false positives on the agent's own text
+        # (technical terms, service names, Spanish verbs misclassified as PERSONA/UBICACION).
+        from .detection import RegexDetector
+        regex_entities = RegexDetector().detect(filtered)
+        for entity in reversed(regex_entities):
             known = False
             for token, val in substitution_map.items():
                 if entity.text == val:
@@ -129,7 +131,6 @@ class Anonymizer:
                     known = True
                     break
             if not known:
-                # Unknown PII in output - replace with generic token
                 replacement = f"[{entity.entity_type}_REDACTED]"
                 filtered = filtered[:entity.start] + replacement + filtered[entity.end:]
                 logger.warning("unknown_pii_in_output", entity_type=entity.entity_type)

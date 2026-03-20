@@ -164,6 +164,15 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
             payload["detectors"] = detectors
         await ws_manager.send_message(client_id, {"type": "ingest_progress", "data": payload})
 
+    # Guard: agent must be configured with an active LLM to attend tickets
+    agent = state.get("agent")
+    if not agent or not getattr(agent, "llm", None):
+        raise HTTPException(
+            status_code=503,
+            detail="El agente no tiene un modelo LLM configurado. "
+                   "Ve a Configuración → Agente y selecciona un modelo antes de atender tickets.",
+        )
+
     # Resolve source connector via router
     connector_router = state.get("connector_router")
     source_system_name = "unknown"
