@@ -12,11 +12,14 @@ async def update_ticket(
     """Actualiza un ticket en el sistema de tickets con informacion anonimizada.
     Puede anadir comentarios y/o cambiar el estado del ticket.
 
+    Cuando status='done', cierra automaticamente tanto el ticket destino (KOSIN)
+    como el ticket origen (Jira fuente).
+
     IMPORTANTE: Solo pasar datos anonimizados (con tokens como [PERSONA_1]).
     Nunca incluir datos personales reales.
 
     Args:
-        ticket_id: ID del ticket (ej: PESESG-123)
+        ticket_id: ID del ticket destino (ej: PESESG-123)
         comment: Comentario anonimizado para anadir al ticket
         status: Nuevo estado (in_progress, delivered, done) - dejar vacio si no se cambia
     """
@@ -36,9 +39,36 @@ async def update_ticket(
         if status:
             success = await kosin.update_status(ticket_id, status)
             if success:
-                results.append(f"Estado de {ticket_id} actualizado a '{status}'")
+                results.append(f"Estado de {ticket_id} (destino) actualizado a '{status}'")
             else:
-                results.append(f"Error al actualizar estado de {ticket_id}")
+                results.append(f"Error al actualizar estado de {ticket_id} (destino)")
+
+            # When closing, also close the source (origin) ticket
+            if status.lower() == "done":
+                try:
+                    db = app_state.get("db")
+                    connector_router = app_state.get("connector_router")
+                    source_connector = app_state.get("jira_connector")
+
+                    if db:
+                        mapping = await db.get_ticket_by_kosin_key(ticket_id)
+                        if mapping:
+                            source_key = mapping.get("source_ticket_id")
+                            if source_key:
+                                # Resolve connector by prefix if router available
+                                if connector_router:
+                                    try:
+                                        source_connector = connector_router.get_connector(source_key)
+                                    except Exception:
+                                        pass
+                                if source_connector:
+                                    ok = await source_connector.update_status(source_key, "done")
+                                    if ok:
+                                        results.append(f"Ticket origen {source_key} cerrado")
+                                    else:
+                                        results.append(f"No se pudo cerrar ticket origen {source_key}")
+                except Exception as e:
+                    results.append(f"Aviso: error al cerrar origen: {str(e)}")
 
         return " | ".join(results) if results else "No se especifico ninguna accion"
     except Exception as e:

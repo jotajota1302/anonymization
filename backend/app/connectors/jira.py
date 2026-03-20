@@ -73,8 +73,59 @@ class JiraConnector(TicketConnector):
             ]
 
     async def update_status(self, ticket_id: str, status: str) -> bool:
-        logger.warning("jira_update_status_not_impl", ticket_id=ticket_id)
-        return False
+        """Apply a Jira transition matching the requested status name.
+
+        Queries available transitions and picks the first one whose name
+        contains any of the target keywords (case-insensitive).
+        """
+        import httpx
+
+        # Keywords to match against Jira transition names
+        STATUS_KEYWORDS = {
+            "done":       ["done", "closed", "close", "resolved", "resolve", "cerrado", "cerrar", "resuelto"],
+            "in_progress": ["progress", "progress", "en curso", "in progress", "working"],
+            "delivered":  ["delivered", "entregado", "pending", "waiting"],
+        }
+        keywords = STATUS_KEYWORDS.get(status.lower(), [status.lower()])
+
+        async with httpx.AsyncClient() as client:
+            # 1. Fetch available transitions
+            resp = await client.get(
+                f"{self.base_url}/rest/api/2/issue/{ticket_id}/transitions",
+                headers=self._headers,
+                auth=self._auth,
+            )
+            if not resp.is_success:
+                logger.warning("jira_transitions_fetch_failed", ticket_id=ticket_id, status_code=resp.status_code)
+                return False
+
+            transitions = resp.json().get("transitions", [])
+            transition_id = None
+            for t in transitions:
+                name = t.get("name", "").lower()
+                if any(kw in name for kw in keywords):
+                    transition_id = t["id"]
+                    break
+
+            if not transition_id:
+                logger.warning(
+                    "jira_transition_not_found",
+                    ticket_id=ticket_id,
+                    status=status,
+                    available=[t.get("name") for t in transitions],
+                )
+                return False
+
+            # 2. Apply the transition
+            resp = await client.post(
+                f"{self.base_url}/rest/api/2/issue/{ticket_id}/transitions",
+                headers=self._headers,
+                auth=self._auth,
+                json={"transition": {"id": transition_id}},
+            )
+            success = resp.is_success
+            logger.info("jira_status_updated", ticket_id=ticket_id, status=status, transition_id=transition_id, ok=success)
+            return success
 
     async def add_comment(self, ticket_id: str, comment: str) -> bool:
         import httpx
