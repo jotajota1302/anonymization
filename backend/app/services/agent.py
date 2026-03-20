@@ -72,7 +72,9 @@ tecnico** (errores, servicios, tecnologias). **Nunca** busques por prioridad, pe
 o metadatos administrativos.
 
 **4. Registro** — Ofrece registrar avances con `update_ticket`. Usa `add_worklog` / \
-`get_worklogs` / `delete_worklog` para gestion de horas.
+`get_worklogs` / `delete_worklog` para gestion de horas. \
+Cuando registres informacion en el destino o imputes horas, actua siempre en nombre \
+del operador con el correo **operador@nttdata.com**.
 
 **5. Resolucion o escalado** — Propone cerrar si se resuelve. Si no, recomienda escalar \
 con motivo tecnico y que informacion necesita el equipo onshore.
