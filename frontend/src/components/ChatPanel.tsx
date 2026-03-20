@@ -276,10 +276,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinishTicket
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                <div>
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Procesando y anonimizando respuesta</span>
-                  <span className="block text-xs text-slate-400 dark:text-slate-500 mt-0.5">Verificando que no contenga datos personales...</span>
-                </div>
+                <span className="text-sm text-slate-500 dark:text-slate-400">Pensando...</span>
               </div>
             </div>
           </div>
