@@ -475,11 +475,11 @@ class AnonymizationAgent:
                     hint="Source ticket modified since ingest, tokens may differ",
                 )
 
-            # Reconstruct map using a FULL composite detector (not the current one)
-            # so that the map matches what was used during ingest
-            from .detection import CompositeDetector
+            # Reconstruct map using the SAME detector type that was active during ingest.
+            # If we reconstruct with a different detector we get different tokens → mismatch.
+            from .detection import CompositeDetector, NullDetector
             try:
-                # Load presidio config from DB if available
+                # Load anonymization config from DB
                 anon_config = None
                 try:
                     row = await self.db.get_system_config("anonymization")
@@ -490,6 +490,7 @@ class AnonymizationAgent:
                 except Exception:
                     pass
 
+                detector_type = (anon_config or {}).get("detector_type", "composite").lower()
                 presidio_cfg = {}
                 if anon_config:
                     presidio_cfg = {
@@ -500,9 +501,10 @@ class AnonymizationAgent:
                         "model_name": anon_config.get("presidio_model", "es_core_news_lg"),
                     }
 
-                reconstruction_detector = CompositeDetector(presidio_config=presidio_cfg)
+                from ..routers.config import _create_detector
+                reconstruction_detector = _create_detector(detector_type, presidio_config=presidio_cfg)
             except Exception as e:
-                logger.warning("composite_detector_for_reconstruction_failed", error=str(e),
+                logger.warning("reconstruction_detector_failed", error=str(e),
                                fallback="current_detector")
                 reconstruction_detector = self.anonymizer._detector
 
