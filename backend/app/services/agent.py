@@ -502,38 +502,12 @@ class AnonymizationAgent:
                     hint="Source ticket modified since ingest, tokens may differ",
                 )
 
-            # Reconstruct map using the SAME detector type that was active during ingest.
-            # If we reconstruct with a different detector we get different tokens → mismatch.
-            from .detection import CompositeDetector, NullDetector
-            try:
-                # Load anonymization config from DB
-                anon_config = None
-                try:
-                    row = await self.db.get_system_config("anonymization")
-                    if row and row.get("extra_config"):
-                        import json
-                        raw = row["extra_config"]
-                        anon_config = json.loads(raw) if isinstance(raw, str) else raw
-                except Exception:
-                    pass
-
-                detector_type = (anon_config or {}).get("detector_type", "composite").lower()
-                presidio_cfg = {}
-                if anon_config:
-                    presidio_cfg = {
-                        "score_threshold": anon_config.get("presidio_sensitivity", 65),
-                        "enabled_entities": anon_config.get("presidio_entities"),
-                        "excluded_words": anon_config.get("presidio_excluded_words"),
-                        "min_lengths": anon_config.get("presidio_min_lengths"),
-                        "model_name": anon_config.get("presidio_model", "es_core_news_lg"),
-                    }
-
-                from ..routers.config import _create_detector
-                reconstruction_detector = _create_detector(detector_type, presidio_config=presidio_cfg)
-            except Exception as e:
-                logger.warning("reconstruction_detector_failed", error=str(e),
-                               fallback="current_detector")
-                reconstruction_detector = self.anonymizer._detector
+            # Reuse the already-loaded detector from app_state.
+            # Creating a new detector (e.g. CompositeDetector) loads spacy synchronously
+            # and blocks the asyncio event loop, causing Kubernetes liveness probe failures
+            # and pod restarts. The detector in app_state is kept up-to-date by the config
+            # router whenever the user changes anonymization settings.
+            reconstruction_detector = app_state.get("detector") or self.anonymizer._detector
 
             reconstruction_anonymizer = Anonymizer(detector=reconstruction_detector)
             sub_map = reconstruction_anonymizer.reconstruct_map(full_text)
