@@ -9,12 +9,20 @@ spec:
   gateways:
   - alicante/alicante-gateway
   http:
+    - name: ticketing-anonymization-ws
+      match:
+      - uri:
+          prefix: /ws
+      route:
+      - destination:
+          host: ticketing-anonymization-backend-service
+          port:
+            number: 8000
+      timeout: 0s  # WebSocket: sin timeout — Istio no debe cerrar conexiones persistentes
     - name: ticketing-anonymization-api
       match:
       - uri:
           prefix: /api
-      - uri:
-          prefix: /ws
       - uri:
           exact: /health
       route:
@@ -22,6 +30,7 @@ spec:
           host: ticketing-anonymization-backend-service
           port:
             number: 8000
+      timeout: 300s  # 5 min para llamadas LLM lentas vía REST
     - name: ticketing-anonymization-frontend
       match:
       - uri:
