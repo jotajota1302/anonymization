@@ -18,7 +18,7 @@ spec:
           host: ticketing-anonymization-backend-service
           port:
             number: 8000
-      timeout: 0s  # WebSocket: sin timeout — Istio no debe cerrar conexiones persistentes
+      timeout: 3600s  # WebSocket: 1h para conexiones persistentes — Istio descarta timeout:0s
     - name: ticketing-anonymization-api
       match:
       - uri:
