@@ -60,6 +60,16 @@ export default function Home() {
   // Confirm modal state (replaces native confirm())
   const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
+  // Refresh tickets when WS reconnects (was disconnected → now connected)
+  const prevConnectedRef = useRef(false);
+  useEffect(() => {
+    if (isConnected && !prevConnectedRef.current) {
+      fetchTickets();
+      fetchBoardTickets();
+    }
+    prevConnectedRef.current = isConnected;
+  }, [isConnected, fetchTickets, fetchBoardTickets]);
+
   const clientIdRef = useRef<string>("");
   const [clientId, setClientId] = useState("operator");
 

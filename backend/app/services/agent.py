@@ -1,5 +1,6 @@
 """LangChain anonymization agent with multi-provider LLM support (Ollama, Azure OpenAI)."""
 
+import asyncio
 import json
 import re
 from typing import Dict, List, Optional, AsyncGenerator
@@ -284,6 +285,32 @@ class StreamingCallback(AsyncCallbackHandler):
 
     def get_full_response(self) -> str:
         return "".join(self.tokens)
+
+
+async def _invoke_with_heartbeat(
+    llm, messages: list, config: dict,
+    ws_manager, client_id: str, ticket_id: int,
+    interval: int = 10,
+):
+    """Invoke LLM while sending periodic WS heartbeats to survive proxy timeouts."""
+
+    async def _heartbeat():
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await ws_manager.send_heartbeat(client_id, ticket_id)
+            except Exception:
+                break
+
+    task = asyncio.create_task(_heartbeat())
+    try:
+        return await llm.ainvoke(messages, config=config)
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 class AnonymizationAgent:
@@ -573,9 +600,10 @@ class AnonymizationAgent:
             # Use LLM with tools via bind_tools
             llm_with_tools = self.llm.bind_tools(self.tools)
 
-            response = await llm_with_tools.ainvoke(
-                messages,
-                config={"callbacks": [streaming_cb]},
+            response = await _invoke_with_heartbeat(
+                llm_with_tools, messages,
+                {"callbacks": [streaming_cb]},
+                self.ws_manager, client_id, ticket_id,
             )
 
             # Check if tools need to be called
@@ -603,9 +631,10 @@ class AnonymizationAgent:
                     messages.append(HumanMessage(content=f"Resultado de herramienta: {tr}"))
 
                 streaming_cb2 = StreamingCallback(self.ws_manager, client_id, ticket_id)
-                final_response = await self.llm.ainvoke(
-                    messages,
-                    config={"callbacks": [streaming_cb2]},
+                final_response = await _invoke_with_heartbeat(
+                    self.llm, messages,
+                    {"callbacks": [streaming_cb2]},
+                    self.ws_manager, client_id, ticket_id,
                 )
                 agent_text = final_response.content
             else:
@@ -675,9 +704,10 @@ class AnonymizationAgent:
         streaming_cb = StreamingCallback(self.ws_manager, client_id, ticket_id)
 
         try:
-            response = await self.llm.ainvoke(
-                messages,
-                config={"callbacks": [streaming_cb]},
+            response = await _invoke_with_heartbeat(
+                self.llm, messages,
+                {"callbacks": [streaming_cb]},
+                self.ws_manager, client_id, ticket_id,
             )
             agent_text = response.content
         except Exception as e:

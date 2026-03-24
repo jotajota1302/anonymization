@@ -16,6 +16,11 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         self._requests: dict = defaultdict(list)
 
     async def dispatch(self, request: Request, call_next):
+        # BaseHTTPMiddleware is incompatible with WebSocket connections.
+        # Skip rate limiting for WS upgrades to avoid dropping the connection.
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 

@@ -60,6 +60,13 @@ class ConnectionManager:
             "ticket_id": ticket_id,
         })
 
+    async def send_heartbeat(self, client_id: str, ticket_id: int = None):
+        """Send a heartbeat frame to keep the WebSocket alive through proxies."""
+        await self.send_message(client_id, {
+            "type": "heartbeat",
+            "ticket_id": ticket_id,
+        })
+
     async def send_info(self, client_id: str, info: str, ticket_id: int = None):
         """Send an informational message."""
         await self.send_message(client_id, {
