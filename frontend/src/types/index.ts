@@ -4,8 +4,8 @@ export interface TicketSummary {
   source_system: string;
   source_ticket_id: string;
   summary: string;
-  status: "open" | "in_progress" | "resolved" | "closed";
-  priority: "low" | "medium" | "high" | "critical";
+  status: "open" | "in_progress" | "delivered" | "resolved" | "closed";
+  priority: "very low" | "low" | "medium" | "high" | "very high" | "critical";
   created_at: string;
 }
 
@@ -39,6 +39,7 @@ export interface IngestStep {
 
 export type WSMessage =
   | { type: "token" | "complete" | "error" | "info"; data: string; ticket_id: number | null }
+  | { type: "pong" | "heartbeat"; ticket_id?: number | null }
   | { type: "ingest_progress"; data: IngestStep; ticket_id: number | null }
   | { type: "finalize_progress" | "sync_progress"; data: Record<string, unknown>; ticket_id: number | null };
 

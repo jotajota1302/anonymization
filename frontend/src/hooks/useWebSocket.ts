@@ -6,12 +6,15 @@ import { useAppStore } from "@/stores/appStore";
 import { WSMessage } from "@/types";
 
 const RECONNECT_INTERVALS = [1000, 2000, 4000, 8000, 16000];
-const PING_INTERVAL = 30000;
+const PING_INTERVAL = 15000;
+const PONG_TIMEOUT = 10000;
 
 export function useWebSocket(clientId: string) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pongTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
 
   const {
     setIsConnected,
@@ -19,7 +22,6 @@ export function useWebSocket(clientId: string) {
     clearStreaming,
     setIsStreaming,
     addMessage,
-    selectedTicketId,
     setSuggestedChips,
     setIngestProgress,
   } = useAppStore();
@@ -33,10 +35,22 @@ export function useWebSocket(clientId: string) {
       setIsConnected(true);
       reconnectAttempt.current = 0;
 
-      // Start ping keepalive
+      // Start ping keepalive with pong timeout detection.
+      // If the backend doesn't reply with pong within PONG_TIMEOUT,
+      // the connection is likely dead (proxy dropped it silently).
       pingIntervalRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ action: "ping" }));
+
+          // Set a pong timeout — if no pong arrives, force-close to trigger reconnect
+          if (pongTimeoutRef.current) clearTimeout(pongTimeoutRef.current);
+          pongTimeoutRef.current = setTimeout(() => {
+            const elapsed = Date.now() - lastActivityRef.current;
+            if (elapsed >= PONG_TIMEOUT) {
+              console.warn("WS pong timeout — forcing reconnect");
+              ws.close();
+            }
+          }, PONG_TIMEOUT);
         }
       }, PING_INTERVAL);
     };
@@ -45,7 +59,15 @@ export function useWebSocket(clientId: string) {
       try {
         const msg: WSMessage = JSON.parse(event.data);
 
+        // Any message from the server counts as activity
+        lastActivityRef.current = Date.now();
+
         switch (msg.type) {
+          case "pong":
+          case "heartbeat":
+            // Keepalive responses — no UI action needed, lastActivityRef already updated
+            break;
+
           case "token":
             appendToken(msg.data);
             setIsStreaming(true);
@@ -120,6 +142,9 @@ export function useWebSocket(clientId: string) {
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
       }
+      if (pongTimeoutRef.current) {
+        clearTimeout(pongTimeoutRef.current);
+      }
 
       // Reconnect with exponential backoff
       const delay =
@@ -158,7 +183,7 @@ export function useWebSocket(clientId: string) {
         setIsStreaming(true);
       }
     },
-    [addMessage, setIsStreaming]
+    [addMessage, setIsStreaming, setSuggestedChips]
   );
 
   const requestSummary = useCallback(
@@ -181,6 +206,9 @@ export function useWebSocket(clientId: string) {
     return () => {
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
+      }
+      if (pongTimeoutRef.current) {
+        clearTimeout(pongTimeoutRef.current);
       }
       if (wsRef.current) {
         wsRef.current.close();

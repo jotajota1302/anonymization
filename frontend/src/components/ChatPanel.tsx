@@ -214,9 +214,9 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
     );
   }
 
-  const statusLabels: Record<string, string> = { open: "Pendiente", in_progress: "En Progreso", resolved: "Resuelto", closed: "Cerrado" };
-  const pLabels: Record<string, string> = { critical: "Critica", high: "Alta", medium: "Media", low: "Baja" };
-  const pColors: Record<string, string> = { critical: "#EF4444", high: "#F59E0B", medium: "#3B82F6", low: "#10B981" };
+  const statusLabels: Record<string, string> = { open: "Pendiente", in_progress: "En Progreso", delivered: "Entregado", resolved: "Resuelto", closed: "Cerrado" };
+  const pLabels: Record<string, string> = { critical: "Critica", "very high": "Muy Alta", high: "Alta", medium: "Media", low: "Baja", "very low": "Muy Baja" };
+  const pColors: Record<string, string> = { critical: "#EF4444", "very high": "#F97316", high: "#F59E0B", medium: "#3B82F6", low: "#10B981", "very low": "#6B7280" };
   const isThinking = isStreaming;
 
   return (

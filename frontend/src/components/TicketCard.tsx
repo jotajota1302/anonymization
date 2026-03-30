@@ -3,15 +3,18 @@
 import { TicketSummary } from "@/types";
 
 const priorityConfig: Record<string, { color: string; shadow: string }> = {
-  critical: { color: "#EF4444", shadow: "rgba(239,68,68,0.5)" },
-  high:     { color: "#F59E0B", shadow: "rgba(245,158,11,0.5)" },
-  medium:   { color: "#3B82F6", shadow: "rgba(59,130,246,0.5)" },
-  low:      { color: "#10B981", shadow: "rgba(16,185,129,0.5)" },
+  critical:    { color: "#EF4444", shadow: "rgba(239,68,68,0.5)" },
+  "very high": { color: "#F97316", shadow: "rgba(249,115,22,0.5)" },
+  high:        { color: "#F59E0B", shadow: "rgba(245,158,11,0.5)" },
+  medium:      { color: "#3B82F6", shadow: "rgba(59,130,246,0.5)" },
+  low:         { color: "#10B981", shadow: "rgba(16,185,129,0.5)" },
+  "very low":  { color: "#6B7280", shadow: "rgba(107,114,128,0.5)" },
 };
 
 const statusConfig: Record<string, string> = {
   open: "Pendiente",
   in_progress: "En progreso",
+  delivered: "Entregado",
   resolved: "Resuelto",
   closed: "Cerrado",
 };

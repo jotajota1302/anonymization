@@ -38,8 +38,13 @@ async def websocket_chat(websocket: WebSocket, client_id: str):
 
             action = data.get("action", "chat")
 
-            # Ping keepalive - just ignore
+            # Ping keepalive — reply with pong to keep bidirectional traffic
+            # flowing through Istio/Envoy proxies
             if action == "ping":
+                try:
+                    await websocket.send_json({"type": "pong"})
+                except Exception:
+                    pass
                 continue
 
             ticket_id = data.get("ticket_id")

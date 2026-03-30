@@ -287,30 +287,51 @@ class StreamingCallback(AsyncCallbackHandler):
         return "".join(self.tokens)
 
 
+class _HeartbeatKeepAlive:
+    """Context manager that sends periodic WS heartbeats to survive proxy timeouts.
+
+    Use this to wrap ANY long-running operation (LLM invoke, KOSIN HTTP calls,
+    tool execution, etc.), not just the LLM call. Istio/Envoy will close idle
+    WebSocket connections even if the Istio timeout is set high.
+    """
+
+    def __init__(self, ws_manager, client_id: str, ticket_id: int, interval: int = 10):
+        self._ws_manager = ws_manager
+        self._client_id = client_id
+        self._ticket_id = ticket_id
+        self._interval = interval
+        self._task: Optional[asyncio.Task] = None
+
+    async def __aenter__(self):
+        async def _heartbeat():
+            while True:
+                await asyncio.sleep(self._interval)
+                try:
+                    await self._ws_manager.send_heartbeat(self._client_id, self._ticket_id)
+                except Exception:
+                    break
+
+        self._task = asyncio.create_task(_heartbeat())
+        return self
+
+    async def __aexit__(self, *exc):
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        return False
+
+
 async def _invoke_with_heartbeat(
     llm, messages: list, config: dict,
     ws_manager, client_id: str, ticket_id: int,
     interval: int = 10,
 ):
     """Invoke LLM while sending periodic WS heartbeats to survive proxy timeouts."""
-
-    async def _heartbeat():
-        while True:
-            await asyncio.sleep(interval)
-            try:
-                await ws_manager.send_heartbeat(client_id, ticket_id)
-            except Exception:
-                break
-
-    task = asyncio.create_task(_heartbeat())
-    try:
+    async with _HeartbeatKeepAlive(ws_manager, client_id, ticket_id, interval):
         return await llm.ainvoke(messages, config=config)
-    finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
 
 
 class AnonymizationAgent:
@@ -546,155 +567,155 @@ class AnonymizationAgent:
         5. Save to chat history
         6. Send response via WebSocket
         """
-        # 1. Load substitution map and ticket context
-        sub_map = await self._get_substitution_map(ticket_id)
-        ticket = await self.db.get_ticket(ticket_id)
+        # Wrap the entire pipeline with heartbeat keepalive.
+        # Previous fix only covered LLM invoke, but KOSIN HTTP calls,
+        # tool execution, and anon_llm filtering also leave the WS idle
+        # long enough for Istio/Envoy to drop the connection.
+        async with _HeartbeatKeepAlive(self.ws_manager, client_id, ticket_id):
+            # 1. Load substitution map and ticket context
+            sub_map = await self._get_substitution_map(ticket_id)
+            ticket = await self.db.get_ticket(ticket_id)
 
-        # Expose sub_map in app_state so tools (read_ticket, etc.) can apply it
-        from ..main import app_state
-        app_state["active_sub_map"] = sub_map
+            # Expose sub_map in app_state so tools (read_ticket, etc.) can apply it
+            from ..main import app_state
+            app_state["active_sub_map"] = sub_map
 
-        # 2. PRE-filter: anonymize user input (regex + optional LLM)
-        filtered_message = self.anonymizer.filter_output(user_message, sub_map)
-        if self.anon_llm:
-            filtered_message = await self.anon_llm.filter_text(filtered_message, sub_map)
+            # 2. PRE-filter: anonymize user input (regex + optional LLM)
+            filtered_message = self.anonymizer.filter_output(user_message, sub_map)
+            if self.anon_llm:
+                filtered_message = await self.anon_llm.filter_text(filtered_message, sub_map)
 
-        # 3. Load chat history
-        history = await self.db.get_chat_history(ticket_id)
+            # 3. Load chat history
+            history = await self.db.get_chat_history(ticket_id)
 
-        # Save operator message
-        await self.db.add_chat_message(ticket_id, "operator", filtered_message)
+            # Save operator message
+            await self.db.add_chat_message(ticket_id, "operator", filtered_message)
 
-        # 4. Build messages and invoke LLM
-        messages = self._build_messages(history, filtered_message, ticket_context=ticket)
+            # 4. Build messages and invoke LLM
+            messages = self._build_messages(history, filtered_message, ticket_context=ticket)
 
-        streaming_cb = StreamingCallback(self.ws_manager, client_id, ticket_id)
+            streaming_cb = StreamingCallback(self.ws_manager, client_id, ticket_id)
 
-        try:
-            # Use LLM with tools via bind_tools
-            llm_with_tools = self.llm.bind_tools(self.tools)
+            try:
+                # Use LLM with tools via bind_tools
+                llm_with_tools = self.llm.bind_tools(self.tools)
 
-            response = await _invoke_with_heartbeat(
-                llm_with_tools, messages,
-                {"callbacks": [streaming_cb]},
-                self.ws_manager, client_id, ticket_id,
+                response = await llm_with_tools.ainvoke(
+                    messages, config={"callbacks": [streaming_cb]}
+                )
+
+                # Check if tools need to be called
+                if response.tool_calls:
+                    tool_results = []
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call["name"]
+                        tool_args = tool_call["args"]
+
+                        # Find and execute the tool
+                        for t in self.tools:
+                            if t.name == tool_name:
+                                await self.ws_manager.send_info(
+                                    client_id,
+                                    f"Ejecutando: {tool_name}...",
+                                    ticket_id,
+                                )
+                                result = await t.ainvoke(tool_args)
+                                tool_results.append(f"[{tool_name}]: {result}")
+                                break
+
+                    # Re-invoke LLM with tool results
+                    messages.append(AIMessage(content=response.content or ""))
+                    for tr in tool_results:
+                        messages.append(HumanMessage(content=f"Resultado de herramienta: {tr}"))
+
+                    streaming_cb2 = StreamingCallback(self.ws_manager, client_id, ticket_id)
+                    final_response = await self.llm.ainvoke(
+                        messages, config={"callbacks": [streaming_cb2]}
+                    )
+                    agent_text = final_response.content
+                else:
+                    agent_text = response.content
+
+            except Exception as e:
+                logger.error("agent_error", error=str(e), ticket_id=ticket_id)
+                agent_text = f"Error al procesar la solicitud. Por favor, intenta de nuevo."
+                await self.ws_manager.send_error(client_id, agent_text, ticket_id)
+                return agent_text
+
+            # 5. POST-filter: scan response for PII leaks (regex + optional LLM)
+            filtered_response = self.anonymizer.filter_output(agent_text, sub_map)
+            if self.anon_llm:
+                filtered_response = await self.anon_llm.filter_text(filtered_response, sub_map)
+
+            # 6. Save agent response
+            await self.db.add_chat_message(ticket_id, "agent", filtered_response)
+
+            # 7. Send complete signal
+            await self.ws_manager.send_complete(client_id, filtered_response, ticket_id)
+
+            # 8. Audit log
+            await self.db.add_audit_log(
+                operator_id="operator",
+                action="chat_message",
+                ticket_mapping_id=ticket_id,
+                details=f"message_length={len(filtered_message)}",
             )
 
-            # Check if tools need to be called
-            if response.tool_calls:
-                tool_results = []
-                for tool_call in response.tool_calls:
-                    tool_name = tool_call["name"]
-                    tool_args = tool_call["args"]
-
-                    # Find and execute the tool
-                    for t in self.tools:
-                        if t.name == tool_name:
-                            await self.ws_manager.send_info(
-                                client_id,
-                                f"Ejecutando: {tool_name}...",
-                                ticket_id,
-                            )
-                            result = await t.ainvoke(tool_args)
-                            tool_results.append(f"[{tool_name}]: {result}")
-                            break
-
-                # Re-invoke LLM with tool results
-                messages.append(AIMessage(content=response.content or ""))
-                for tr in tool_results:
-                    messages.append(HumanMessage(content=f"Resultado de herramienta: {tr}"))
-
-                streaming_cb2 = StreamingCallback(self.ws_manager, client_id, ticket_id)
-                final_response = await _invoke_with_heartbeat(
-                    self.llm, messages,
-                    {"callbacks": [streaming_cb2]},
-                    self.ws_manager, client_id, ticket_id,
-                )
-                agent_text = final_response.content
-            else:
-                agent_text = response.content
-
-        except Exception as e:
-            logger.error("agent_error", error=str(e), ticket_id=ticket_id)
-            agent_text = f"Error al procesar la solicitud. Por favor, intenta de nuevo."
-            await self.ws_manager.send_error(client_id, agent_text, ticket_id)
-            return agent_text
-
-        # 5. POST-filter: scan response for PII leaks (regex + optional LLM)
-        filtered_response = self.anonymizer.filter_output(agent_text, sub_map)
-        if self.anon_llm:
-            filtered_response = await self.anon_llm.filter_text(filtered_response, sub_map)
-
-        # 6. Save agent response
-        await self.db.add_chat_message(ticket_id, "agent", filtered_response)
-
-        # 7. Send complete signal
-        await self.ws_manager.send_complete(client_id, filtered_response, ticket_id)
-
-        # 8. Audit log
-        await self.db.add_audit_log(
-            operator_id="operator",
-            action="chat_message",
-            ticket_mapping_id=ticket_id,
-            details=f"message_length={len(filtered_message)}",
-        )
-
-        return filtered_response
+            return filtered_response
 
     async def generate_initial_summary(
         self, ticket_id: int, client_id: str
     ) -> str:
         """Generate an anonymized initial summary when a ticket is selected."""
-        sub_map = await self._get_substitution_map(ticket_id)
-        ticket = await self.db.get_ticket(ticket_id)
+        async with _HeartbeatKeepAlive(self.ws_manager, client_id, ticket_id):
+            sub_map = await self._get_substitution_map(ticket_id)
+            ticket = await self.db.get_ticket(ticket_id)
 
-        if not ticket:
-            return "Ticket no encontrado."
+            if not ticket:
+                return "Ticket no encontrado."
 
-        # Load existing chat history so the LLM has full context
-        history = await self.db.get_chat_history(ticket_id)
+            # Load existing chat history so the LLM has full context
+            history = await self.db.get_chat_history(ticket_id)
 
-        prompt = (
-            f"El operador ha seleccionado la siguiente incidencia para revisarla. "
-            f"Presentale un resumen claro y preguntale como quiere proceder.\n\n"
-            f"Ticket origen: {ticket['source_ticket_id']}\n"
-            f"Referencia KOSIN: {ticket['kosin_ticket_id']}\n"
-            f"Resumen: {ticket['summary']}\n"
-            f"Descripcion anonimizada:\n{ticket['anonymized_description']}\n"
-            f"Estado: {ticket['status']}\n"
-            f"Prioridad: {ticket['priority']}\n\n"
-            f"Recuerda: usa solo los tokens de anonimizacion, nunca inventes datos personales."
-        )
-
-        # Build messages with history context
-        messages = [SystemMessage(content=self._get_system_prompt())]
-        for msg in history:
-            if msg["role"] == "operator":
-                messages.append(HumanMessage(content=msg["message"]))
-            else:
-                messages.append(AIMessage(content=msg["message"]))
-        messages.append(HumanMessage(content=prompt))
-
-        streaming_cb = StreamingCallback(self.ws_manager, client_id, ticket_id)
-
-        try:
-            response = await _invoke_with_heartbeat(
-                self.llm, messages,
-                {"callbacks": [streaming_cb]},
-                self.ws_manager, client_id, ticket_id,
-            )
-            agent_text = response.content
-        except Exception as e:
-            logger.error("summary_error", error=str(e))
-            agent_text = (
-                f"Ticket {ticket['kosin_ticket_id']}: "
-                f"{ticket['summary']}\n\n"
-                f"Estado: {ticket['status']} | Prioridad: {ticket['priority']}\n\n"
-                f"{ticket['anonymized_description']}"
+            prompt = (
+                f"El operador ha seleccionado la siguiente incidencia para revisarla. "
+                f"Presentale un resumen claro y preguntale como quiere proceder.\n\n"
+                f"Ticket origen: {ticket['source_ticket_id']}\n"
+                f"Referencia KOSIN: {ticket['kosin_ticket_id']}\n"
+                f"Resumen: {ticket['summary']}\n"
+                f"Descripcion anonimizada:\n{ticket['anonymized_description']}\n"
+                f"Estado: {ticket['status']}\n"
+                f"Prioridad: {ticket['priority']}\n\n"
+                f"Recuerda: usa solo los tokens de anonimizacion, nunca inventes datos personales."
             )
 
-        filtered = self.anonymizer.filter_output(agent_text, sub_map)
-        await self.db.add_chat_message(ticket_id, "agent", filtered)
-        await self.ws_manager.send_complete(client_id, filtered, ticket_id)
+            # Build messages with history context
+            messages = [SystemMessage(content=self._get_system_prompt())]
+            for msg in history:
+                if msg["role"] == "operator":
+                    messages.append(HumanMessage(content=msg["message"]))
+                else:
+                    messages.append(AIMessage(content=msg["message"]))
+            messages.append(HumanMessage(content=prompt))
 
-        return filtered
+            streaming_cb = StreamingCallback(self.ws_manager, client_id, ticket_id)
+
+            try:
+                response = await self.llm.ainvoke(
+                    messages, config={"callbacks": [streaming_cb]}
+                )
+                agent_text = response.content
+            except Exception as e:
+                logger.error("summary_error", error=str(e))
+                agent_text = (
+                    f"Ticket {ticket['kosin_ticket_id']}: "
+                    f"{ticket['summary']}\n\n"
+                    f"Estado: {ticket['status']} | Prioridad: {ticket['priority']}\n\n"
+                    f"{ticket['anonymized_description']}"
+                )
+
+            filtered = self.anonymizer.filter_output(agent_text, sub_map)
+            await self.db.add_chat_message(ticket_id, "agent", filtered)
+            await self.ws_manager.send_complete(client_id, filtered, ticket_id)
+
+            return filtered
