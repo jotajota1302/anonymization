@@ -10,6 +10,15 @@ import { Header } from "@/components/Header";
 import { API_URL } from "@/lib/config";
 import { TicketSummary, BoardTicket } from "@/types";
 
+/** Safely parse JSON from a response, returning a fallback on parse failure. */
+async function safeJson(res: Response, fallback: Record<string, string> = {}): Promise<Record<string, unknown>> {
+  try {
+    return await res.json();
+  } catch {
+    return { ...fallback, detail: await res.text().catch(() => `HTTP ${res.status}`) };
+  }
+}
+
 export default function Home() {
   const {
     tickets,
@@ -194,7 +203,7 @@ export default function Home() {
           setIsIngesting(false);
           handleSelectTicket(data.ticket_id);
         } else {
-          const err = await res.json();
+          const err = await safeJson(res);
           showToast(`Error al ingestar: ${err.detail || "Error desconocido"}`);
           setIsIngesting(false);
         }
@@ -237,7 +246,7 @@ export default function Home() {
         showToast(data.message, "success");
         fetchTickets();
       } else {
-        const err = await res.json();
+        const err = await safeJson(res);
         showToast(`Error al finalizar destino: ${err.detail || "Error desconocido"}`);
       }
     } catch (err) {
@@ -257,7 +266,7 @@ export default function Home() {
           body: JSON.stringify({ comment }),
         });
         if (!res.ok) {
-          const err = await res.json();
+          const err = await safeJson(res);
           showToast(`Error al sincronizar: ${err.detail || "Error desconocido"}`);
         }
       } catch (err) {
@@ -283,7 +292,7 @@ export default function Home() {
         }
         fetchTickets();
       } else {
-        const err = await res.json();
+        const err = await safeJson(res);
         showToast(`Error al sincronizar con origen: ${err.detail || "Error desconocido"}`);
       }
     } catch (err) {

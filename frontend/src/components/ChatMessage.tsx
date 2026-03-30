@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatMessage as ChatMessageType } from "@/types";
+import { KOSIN_BROWSE_URL } from "@/lib/config";
 
 interface Props {
   message: ChatMessageType;
@@ -11,8 +12,6 @@ interface Props {
 function stripChips(text: string): string {
   return text.replace(/\[CHIPS[:\s].*\](?!.*\])/gs, "").replace(/\[CHIPS[:\s].*$/s, "").trim();
 }
-
-const KOSIN_BASE = "https://umane.emeal.nttdata.com/jiraito/browse";
 
 function TokenBadge({ token }: { token: string }) {
   return (
@@ -40,7 +39,7 @@ function renderInlineTokens(text: string): (string | JSX.Element)[] {
       );
     } else if (match[4]) {
       parts.push(
-        <a key={match.index} href={`${KOSIN_BASE}/${match[4]}`} target="_blank" rel="noopener noreferrer"
+        <a key={match.index} href={`${KOSIN_BROWSE_URL}/${match[4]}`} target="_blank" rel="noopener noreferrer"
           className="text-primary hover:text-blue-700 underline font-medium">
           {match[4]}
         </a>

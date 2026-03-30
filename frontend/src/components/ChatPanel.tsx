@@ -5,6 +5,7 @@ import { useAppStore } from "@/stores/appStore";
 import { ChatMessage } from "./ChatMessage";
 import { IngestProgress } from "./IngestProgress";
 import { BoardTicket } from "@/types";
+import { KOSIN_BROWSE_URL } from "@/lib/config";
 
 // Reusable SVG icons
 const IconShield = ({ size = 24, className = "" }: { size?: number; className?: string }) => (
@@ -59,7 +60,10 @@ const IconClip = () => (
   </svg>
 );
 
-const KOSIN_BASE = "https://umane.emeal.nttdata.com/jiraito/browse";
+// Status and priority display maps (module-level to avoid re-creation on each render)
+const STATUS_LABELS: Record<string, string> = { open: "Pendiente", in_progress: "En Progreso", delivered: "Entregado", resolved: "Resuelto", closed: "Cerrado" };
+const PRIORITY_LABELS: Record<string, string> = { critical: "Critica", "very high": "Muy Alta", high: "Alta", medium: "Media", low: "Baja", "very low": "Muy Baja" };
+const PRIORITY_COLORS: Record<string, string> = { critical: "#EF4444", "very high": "#F97316", high: "#F59E0B", medium: "#3B82F6", low: "#10B981", "very low": "#6B7280" };
 
 const IconExternalLink = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -91,7 +95,7 @@ interface Props {
   boardTicket: BoardTicket | null;
   onSendMessage: (message: string, isChip?: boolean) => void;
   onFinalizeDestination: () => void;
-  onSyncComment: (comment: string) => void;
+  onSyncComment: (comment: string) => void | Promise<void>;
   onSyncAndCloseSource: () => void;
   onConfirmIngest: (key: string) => void;
 }
@@ -214,9 +218,9 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
     );
   }
 
-  const statusLabels: Record<string, string> = { open: "Pendiente", in_progress: "En Progreso", delivered: "Entregado", resolved: "Resuelto", closed: "Cerrado" };
-  const pLabels: Record<string, string> = { critical: "Critica", "very high": "Muy Alta", high: "Alta", medium: "Media", low: "Baja", "very low": "Muy Baja" };
-  const pColors: Record<string, string> = { critical: "#EF4444", "very high": "#F97316", high: "#F59E0B", medium: "#3B82F6", low: "#10B981", "very low": "#6B7280" };
+  const statusLabels = STATUS_LABELS;
+  const pLabels = PRIORITY_LABELS;
+  const pColors = PRIORITY_COLORS;
   const isThinking = isStreaming;
 
   return (
@@ -228,7 +232,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
             <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">[ANON] {ticket.kosin_id}</h2>
             <div className="flex items-center gap-3 mt-1">
               <a
-                href={`${KOSIN_BASE}/${ticket.kosin_id}`}
+                href={`${KOSIN_BROWSE_URL}/${ticket.kosin_id}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-blue-600 transition-colors"
@@ -238,7 +242,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
               </a>
               {ticket.source_ticket_id && (
                 <a
-                  href={`${KOSIN_BASE}/${ticket.source_ticket_id}`}
+                  href={`${KOSIN_BROWSE_URL}/${ticket.source_ticket_id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
@@ -341,15 +345,18 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
             {ticket && ticket.status !== "resolved" && ticket.status !== "closed" && (
               <>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     const agentMsgs = messages.filter((m) => m.role === "agent");
                     const lastAgent = agentMsgs[agentMsgs.length - 1];
                     if (!lastAgent) return;
                     const comment = lastAgent.content.replace(/\[CHIPS[:\s].*?\]/gs, "").trim();
                     if (!comment) return;
                     setIsSyncing(true);
-                    onSyncComment(comment);
-                    setTimeout(() => setIsSyncing(false), 2000);
+                    try {
+                      await onSyncComment(comment);
+                    } finally {
+                      setIsSyncing(false);
+                    }
                   }}
                   disabled={isSyncing}
                   title="Enviar ultimo comentario del agente al ticket origen"
