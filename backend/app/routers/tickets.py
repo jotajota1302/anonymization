@@ -164,14 +164,19 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
             payload["detectors"] = detectors
         await ws_manager.send_message(client_id, {"type": "ingest_progress", "data": payload})
 
-    # Guard: agent must be configured with an active LLM to attend tickets
+    # Guard: agent must be configured with a FUNCTIONAL LLM to attend tickets.
+    # LangChain creates LLM objects even with empty/expired credentials,
+    # so we check actual readiness (valid API key, active OKTA token, etc.)
     agent = state.get("agent")
     if not agent or not getattr(agent, "llm", None):
         raise HTTPException(
             status_code=503,
             detail="El agente no tiene un modelo LLM configurado. "
-                   "Ve a Configuración → Agente y selecciona un modelo antes de atender tickets.",
+                   "Ve a Configuracion → Agente y selecciona un modelo antes de atender tickets.",
         )
+    llm_ready, llm_error = agent.check_llm_ready()
+    if not llm_ready:
+        raise HTTPException(status_code=503, detail=llm_error)
 
     # Resolve source connector via router
     connector_router = state.get("connector_router")

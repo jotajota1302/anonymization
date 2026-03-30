@@ -55,6 +55,13 @@ async def websocket_chat(websocket: WebSocket, client_id: str):
                 continue
 
             try:
+                # Verify LLM is still functional (token may have expired)
+                if agent and hasattr(agent, "check_llm_ready"):
+                    ready, err = agent.check_llm_ready()
+                    if not ready:
+                        await ws_manager.send_error(client_id, err, ticket_id)
+                        continue
+
                 if action == "summary":
                     # Generate initial summary for a ticket
                     await agent.generate_initial_summary(ticket_id, client_id)

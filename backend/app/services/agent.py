@@ -353,6 +353,8 @@ class AnonymizationAgent:
 
         # Initialize LLM based on provider
         self.llm = self._create_llm()
+        self._llm_provider = settings.llm_provider
+        self._llm_model = ""
         logger.info("resolution_llm_initialized", provider=settings.llm_provider)
         if anon_llm:
             logger.info("anon_llm_attached")
@@ -425,12 +427,52 @@ class AnonymizationAgent:
     def update_llm(self, provider: str, model: str, temperature: float = 0.3, **kwargs):
         """Hot-reload: recreate the LLM instance with new config."""
         self.llm = self._create_llm(provider=provider, model=model, temperature=temperature, **kwargs)
+        self._llm_provider = provider
+        self._llm_model = model
         logger.info("llm_hot_reloaded", provider=provider, model=model, temperature=temperature)
 
     def set_active_tools(self, tool_states: Dict[str, bool]):
         """Hot-reload: filter active tools based on name→enabled mapping."""
         self.tools = [t for t in self.all_tools if tool_states.get(t.name, True)]
         logger.info("tools_hot_reloaded", active=[t.name for t in self.tools])
+
+    def check_llm_ready(self) -> tuple[bool, str]:
+        """Verify the LLM is actually usable (has valid credentials/config).
+
+        Returns (is_ready, error_message). LangChain creates LLM objects
+        even with empty/expired credentials — they only fail at invoke time.
+        This method catches that before the operator starts working.
+        """
+        if not self.llm:
+            return False, "No hay modelo LLM configurado."
+
+        provider = self._llm_provider.lower()
+
+        if provider == "openai":
+            api_key = getattr(self.llm, "openai_api_key", None) or ""
+            # Pydantic SecretStr
+            key_str = api_key.get_secret_value() if hasattr(api_key, "get_secret_value") else str(api_key)
+            if not key_str or key_str == "dummy-key":
+                return False, "OpenAI API key no configurada. Ve a Configuracion → Agente."
+
+        elif provider == "axet":
+            from ..routers.axet_auth import get_token_or_setting
+            token = get_token_or_setting()
+            if not token:
+                return False, "Axet: no hay token activo. Inicia sesion con OKTA en Configuracion → Agente."
+            project_id = settings.axet_project_id
+            if not project_id:
+                return False, "Axet: project_id no configurado. Selecciona un proyecto en Configuracion → Agente."
+
+        elif provider == "ollama":
+            # Ollama doesn't need credentials, but we could check connectivity
+            # For now, trust the config — failures will surface at invoke time
+            pass
+
+        else:
+            return False, f"Provider LLM desconocido: {provider}"
+
+        return True, ""
 
     def _get_system_prompt(self) -> str:
         """Get current system prompt from app_state or fallback to default."""

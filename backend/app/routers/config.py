@@ -459,6 +459,10 @@ async def update_agent_config(body: AgentConfigUpdate):
                     temperature=config.get("temperature", 0.3),
                 )
             except Exception as e:
+                # Clear the LLM so check_llm_ready() will block operations
+                # instead of letting them proceed with a broken config
+                agent.llm = None
+                agent._llm_provider = config.get("provider", "")
                 logger.error("agent_llm_hot_reload_failed", error=str(e))
                 return {**config, "warning": f"Config guardada pero fallo al recargar LLM: {str(e)}"}
 
