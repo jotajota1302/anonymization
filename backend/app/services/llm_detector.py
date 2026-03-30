@@ -109,7 +109,7 @@ async def llm_detect_pii(
     text: str,
     already_detected: List[PiiEntity],
     llm,
-    detectors_active: bool = True,
+    ner_active: bool = False,
 ) -> List[PiiEntity]:
     """Use LLM to find PII that regex/presidio missed.
 
@@ -117,18 +117,20 @@ async def llm_detect_pii(
         text: Full text to analyze.
         already_detected: Entities already found by regex/Presidio.
         llm: LangChain LLM instance.
-        detectors_active: If False, regex/Presidio are disabled and
-            the LLM must detect ALL PII types (not just names).
+        ner_active: True ONLY when Presidio NER is running (detects names,
+            orgs, locations). When False the LLM must detect ALL PII types.
+            Regex alone does NOT count — it only handles structured patterns
+            (emails, DNIs, phones, etc.) and cannot detect names/orgs/locations.
     """
-    if detectors_active and len(already_detected) > 0:
-        # Regex/Presidio are active and already found things — focus on names
+    if ner_active and len(already_detected) > 0:
+        # Presidio NER is running and found things — focus on names it missed
         prompt_template = DETECTION_PROMPT_NAMES_ONLY
     else:
-        # No detectors or they found nothing — LLM is the primary detector
+        # No NER or nothing detected yet — LLM is the primary/full detector
         prompt_template = DETECTION_PROMPT_FULL
         logger.info(
             "llm_detector_full_mode",
-            reason="no_detectors" if not detectors_active else "no_prior_detections",
+            reason="no_ner" if not ner_active else "no_prior_detections",
             text_length=len(text),
         )
 
@@ -228,7 +230,7 @@ async def llm_detect_pii(
 
     logger.info(
         "llm_detector_done",
-        mode="full" if not detectors_active or not already_detected else "names_only",
+        mode="full" if not ner_active or not already_detected else "names_only",
         llm_found=len(items),
         new_entities=len(new_entities),
         reclassified=len(reclassified),

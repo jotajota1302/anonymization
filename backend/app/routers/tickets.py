@@ -270,14 +270,13 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
         await _progress("detecting_pii", 1, detectors=det_state)
         try:
             from ..services.llm_detector import llm_detect_pii
-            from ..services.detection import NullDetector
             already = anonymizer.detect_pii(full_text)
-            # detectors_active = True if regex/presidio are running (regardless of whether
-            # they found anything). Use breakdown flags first, then fall back to detector type.
-            detectors_active = (has_regex or has_presidio) or (
-                not isinstance(anonymizer._detector, NullDetector)
-            )
-            llm_entities = await llm_detect_pii(full_text, already, agent.llm, detectors_active=detectors_active)
+            # ner_active = True ONLY when Presidio NER is part of the detector.
+            # Regex alone doesn't count because it can't detect names/orgs/locations.
+            # When ner_active=False, the LLM uses the full detection prompt
+            # (all PII types) instead of just names.
+            ner_active = has_presidio
+            llm_entities = await llm_detect_pii(full_text, already, agent.llm, ner_active=ner_active)
             det_state["agente"] = {"status": "completed", "count": len(llm_entities)}
         except Exception as e:
             logger.warning("llm_detector_failed", error=str(e))
