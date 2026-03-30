@@ -340,11 +340,14 @@ class KosinConnector(TicketConnector):
         self, ticket_id: str, time_spent: str, comment: str = "", started: str = ""
     ) -> bool:
         """Add a worklog entry to a KOSIN ticket."""
-        payload = {"timeSpent": time_spent}
+        # Jira REST API v2 requires 'started' in worklog payload.
+        # Default to current time if not provided.
+        if not started:
+            from datetime import datetime, timezone
+            started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+0000")
+        payload = {"timeSpent": time_spent, "started": started}
         if comment:
             payload["comment"] = comment
-        if started:
-            payload["started"] = started
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
@@ -357,12 +360,12 @@ class KosinConnector(TicketConnector):
                 return True
         except httpx.HTTPStatusError as e:
             body = e.response.text[:500] if e.response else "no response"
-            logger.error("kosin_worklog_add_failed", error=f"HTTP {e.response.status_code}: {body}")
-            return False
+            logger.error("kosin_worklog_add_failed", ticket=ticket_id, error=f"HTTP {e.response.status_code}: {body}")
+            raise RuntimeError(f"HTTP {e.response.status_code} al registrar worklog en {ticket_id}: {body}")
         except httpx.HTTPError as e:
             error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
-            logger.error("kosin_worklog_add_failed", error=error_msg, error_type=type(e).__name__)
-            return False
+            logger.error("kosin_worklog_add_failed", ticket=ticket_id, error=error_msg)
+            raise RuntimeError(f"Error de conexion al registrar worklog en {ticket_id}: {error_msg}")
 
     async def get_worklogs(self, ticket_id: str) -> List[Dict]:
         """Get all worklog entries for a KOSIN ticket."""
@@ -513,11 +516,11 @@ class KosinConnector(TicketConnector):
                 return True
         except httpx.HTTPStatusError as e:
             body = e.response.text[:500] if e.response else "no response"
-            logger.error("kosin_worklog_delete_failed", error=f"HTTP {e.response.status_code}: {body}")
-            return False
+            logger.error("kosin_worklog_delete_failed", ticket=ticket_id, error=f"HTTP {e.response.status_code}: {body}")
+            raise RuntimeError(f"HTTP {e.response.status_code} al eliminar worklog de {ticket_id}: {body}")
         except httpx.HTTPError as e:
             error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
-            logger.error("kosin_worklog_delete_failed", error=error_msg, error_type=type(e).__name__)
-            return False
+            logger.error("kosin_worklog_delete_failed", ticket=ticket_id, error=error_msg)
+            raise RuntimeError(f"Error de conexion al eliminar worklog de {ticket_id}: {error_msg}")
 
 

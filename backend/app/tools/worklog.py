@@ -17,13 +17,11 @@ async def add_worklog(ticket_id: str, time_spent: str, comment: str = "") -> str
     kosin = app_state["destination_connector"]
 
     try:
-        success = await kosin.add_worklog(ticket_id, time_spent, comment)
-        if success:
-            msg = f"Worklog registrado en {ticket_id}: {time_spent}"
-            if comment:
-                msg += f" ({comment})"
-            return msg
-        return f"Error al registrar worklog en {ticket_id}"
+        await kosin.add_worklog(ticket_id, time_spent, comment)
+        msg = f"Worklog registrado en {ticket_id}: {time_spent}"
+        if comment:
+            msg += f" ({comment})"
+        return msg
     except NotImplementedError:
         return "El conector actual no soporta worklogs."
     except Exception as e:
@@ -80,10 +78,8 @@ async def delete_worklog(ticket_id: str, worklog_id: str) -> str:
     kosin = app_state["destination_connector"]
 
     try:
-        success = await kosin.delete_worklog(ticket_id, worklog_id)
-        if success:
-            return f"Worklog {worklog_id} eliminado de {ticket_id}"
-        return f"Error al eliminar worklog {worklog_id} de {ticket_id}"
+        await kosin.delete_worklog(ticket_id, worklog_id)
+        return f"Worklog {worklog_id} eliminado de {ticket_id}"
     except NotImplementedError:
         return "El conector actual no soporta worklogs."
     except Exception as e:
