@@ -2,7 +2,6 @@
 
 import { useEffect, useCallback, useState, useRef } from "react";
 import { useAppStore } from "@/stores/appStore";
-import { useWebSocket } from "@/hooks/useWebSocket";
 import { TicketList } from "@/components/TicketList";
 import { ChatPanel } from "@/components/ChatPanel";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -69,15 +68,10 @@ export default function Home() {
   // Confirm modal state (replaces native confirm())
   const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
-  const clientIdRef = useRef<string>("");
-  const [clientId, setClientId] = useState("operator");
-
-  useEffect(() => {
-    clientIdRef.current = `op-${Date.now()}`;
-    setClientId(clientIdRef.current);
-  }, []);
-
-  const { sendMessage, requestSummary } = useWebSocket(clientId);
+  // WebSocket actions are provided by WebSocketProvider at layout level
+  const sendMessage = useAppStore((s) => s.wsSendMessage);
+  const requestSummary = useAppStore((s) => s.wsRequestSummary);
+  const clientId = typeof window !== "undefined" ? (window as unknown as Record<string, string>).__wsClientId || "operator" : "operator";
 
   const fetchBoardTickets = useCallback(async () => {
     setIsLoadingBoard(true);
@@ -158,7 +152,7 @@ export default function Home() {
           if (data.chat_history?.length > 0) {
             setChatHistory(ticketId, data.chat_history);
           } else {
-            requestSummary(ticketId);
+            requestSummary?.(ticketId);
           }
         }
       } catch (err) {
@@ -218,7 +212,7 @@ export default function Home() {
   const handleSendMessage = useCallback(
     (message: string, isChip: boolean = false) => {
       if (selectedTicketId) {
-        sendMessage(selectedTicketId, message);
+        sendMessage?.(selectedTicketId, message);
         if (isChip) {
           fetch(`${API_URL}/api/tickets/${selectedTicketId}/destination-comment`, {
             method: "POST",

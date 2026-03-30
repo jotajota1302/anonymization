@@ -59,6 +59,11 @@ interface AppState {
   setPiiWarning: (ticketId: number, warning: string) => void;
   setSuggestedChips: (chips: string[]) => void;
   updateTicketStatus: (ticketId: number, status: TicketSummary["status"]) => void;
+
+  // WebSocket actions (set by WebSocketProvider at layout level)
+  wsSendMessage: ((ticketId: number, message: string) => void) | null;
+  wsRequestSummary: ((ticketId: number) => void) | null;
+  setWsActions: (send: (ticketId: number, message: string) => void, summary: (ticketId: number) => void) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -147,4 +152,8 @@ export const useAppStore = create<AppState>((set) => ({
         t.id === ticketId ? { ...t, status } : t
       ),
     })),
+
+  wsSendMessage: null,
+  wsRequestSummary: null,
+  setWsActions: (send, summary) => set({ wsSendMessage: send, wsRequestSummary: summary }),
 }));

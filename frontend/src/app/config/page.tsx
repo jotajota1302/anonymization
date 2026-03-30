@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { IntegrationConfig, AgentConfig, AgentTool } from "@/types";
 import { Header } from "@/components/Header";
+import { useAuthStore } from "@/stores/authStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -134,6 +135,8 @@ const descCls = "text-sm text-slate-500 dark:text-slate-400";
 const btnPrimary = "px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50";
 
 export default function ConfigPage() {
+  const { isAuthenticated, skipAuth, user: authUser } = useAuthStore();
+  const isAxetOnlyMode = isAuthenticated && !skipAuth;
   const [activeTab, setActiveTab] = useState<Tab>("integrations");
 
   // Anonymization settings state
@@ -813,8 +816,21 @@ export default function ConfigPage() {
                   <h2 className={h2Cls}>Proveedor y Modelo</h2>
                   <p className={`${descCls} mb-4`}>Configura el LLM que usa el agente de anonimizacion.</p>
 
-                  {/* Provider radio cards */}
-                  <div className="grid grid-cols-2 gap-3 mb-4">
+                  {/* Provider radio cards — hidden in Axet-only mode (logged in via OKTA) */}
+                  {isAxetOnlyMode && (
+                    <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 mb-4 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            Sesion activa — {authUser?.displayName || authUser?.name || authUser?.email || "Usuario"}
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">Proveedor: Axet NTT (via OKTA)</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {!isAxetOnlyMode && <div className="grid grid-cols-2 gap-3 mb-4">
                     {[
                       { id: "openai", title: "OpenAI", desc: "API directa GPT", bgColor: "bg-slate-800 dark:bg-slate-600" },
                       { id: "axet", title: "Axet NTT", desc: "Proxy corporativo", bgColor: "bg-purple-600" },
@@ -855,11 +871,28 @@ export default function ConfigPage() {
                         </div>
                       </button>
                     ))}
-                  </div>
+                  </div>}
 
                   {/* Model selection */}
                   <div className={`${cardCls} p-5 space-y-4`}>
-                    {agentProvider === "openai" ? (
+                    {isAxetOnlyMode ? (
+                      <>
+                        {/* Axet-only mode: just model selection from available models */}
+                        <div>
+                          <label className={labelCls}>Modelo</label>
+                          <select value={agentModel} onChange={(e) => setAgentModel(e.target.value)} className={inputCls}>
+                            {axetModels.length > 0 ? axetModels.map((m) => (
+                              <option key={m.id} value={m.id}>{m.displayName || m.id}</option>
+                            )) : (
+                              <option value={agentModel}>{agentModel || "Cargando modelos..."}</option>
+                            )}
+                          </select>
+                          {axetModels.length === 0 && (
+                            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Los modelos se cargan automaticamente desde Axet</p>
+                          )}
+                        </div>
+                      </>
+                    ) : agentProvider === "openai" ? (
                       <>
                         <div>
                           <label className={labelCls}>Modelo</label>

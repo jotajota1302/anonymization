@@ -71,6 +71,24 @@ export interface AgentTool {
   enabled: boolean;
 }
 
+export interface AuthUser {
+  displayName?: string;
+  name?: string;
+  email?: string;
+  preferred_username?: string;
+  id?: string;
+  projects?: string[];
+}
+
+export interface AuthStatus {
+  authenticated: boolean;
+  user?: AuthUser;
+  expires_in?: number;
+  has_refresh_token?: boolean;
+  expired?: boolean;
+  message?: string;
+}
+
 export interface IntegrationConfig {
   id: number;
   system_name: string;

@@ -76,6 +76,9 @@ class Settings(BaseSettings):
         description="Allowed CORS origins"
     )
 
+    # Auth
+    skip_auth: bool = Field(default=True, description="Skip OKTA auth for local dev (set to false in production)")
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
