@@ -121,6 +121,8 @@ export function TicketList({ boardTickets, tickets, selectedTicketId, selectedBo
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
               <input
                 type="text"
+                name="ticket-search"
+                aria-label="Buscar por clave, tipo, estado"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Buscar por clave, tipo, estado..."

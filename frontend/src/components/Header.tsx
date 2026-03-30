@@ -19,7 +19,7 @@ export function Header({ activePage, isConnected, subheader }: HeaderProps) {
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="h-8 px-2 bg-white dark:bg-slate-800 rounded flex items-center border border-slate-200 dark:border-slate-700">
-              <img src="/logo-ntt.jpg" alt="NTT DATA" className="h-5 object-contain" />
+              <img src="/logo-ntt.jpg" alt="NTT DATA" width={80} height={20} className="h-5 object-contain" />
             </div>
             <h1 className="text-slate-800 dark:text-slate-100 font-bold text-lg tracking-tight">Plataforma de Anonimizacion</h1>
           </div>
@@ -40,7 +40,11 @@ export function Header({ activePage, isConnected, subheader }: HeaderProps) {
           {isConnected !== undefined && (
             <>
               <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
-              <div className="flex items-center gap-2 px-3 py-1 bg-green-50 dark:bg-green-900/30 rounded-full border border-green-100 dark:border-green-800">
+              <div className={`flex items-center gap-2 px-3 py-1 rounded-full border ${
+                isConnected
+                  ? "bg-green-50 dark:bg-green-900/30 border-green-100 dark:border-green-800"
+                  : "bg-red-50 dark:bg-red-900/30 border-red-100 dark:border-red-800"
+              }`}>
                 <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
                 <span className={`text-xs font-bold uppercase tracking-wider ${isConnected ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400"}`}>
                   {isConnected ? "Conectado" : "Desconectado"}

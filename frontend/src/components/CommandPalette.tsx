@@ -169,7 +169,7 @@ export function CommandPalette({ onSelectTicket, onSelectBoardTicket }: Props) {
     const isSelected = idx === selectedIndex;
     return (
       <div key={item.id}
-        className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? "bg-primary/10 text-primary" : "text-slate-700 hover:bg-slate-50"}`}
+        className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? "bg-primary/10 text-primary" : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50"}`}
         onClick={() => { if (item.href) window.location.href = item.href; else item.action?.(); }}
         onMouseEnter={() => setSelectedIndex(idx)}
       >
@@ -195,59 +195,59 @@ export function CommandPalette({ onSelectTicket, onSelectBoardTicket }: Props) {
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" />
 
       {/* Palette */}
-      <div className="relative w-full max-w-lg bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-full max-w-lg bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={(e) => e.stopPropagation()}>
         {/* Search */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700">
           <span className="text-slate-400"><IconSearch /></span>
-          <input ref={inputRef} type="text" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={handleKeyDown}
+          <input ref={inputRef} type="text" name="command-search" aria-label="Buscar tickets, acciones, navegacion" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={handleKeyDown}
             placeholder="Buscar tickets, acciones, navegacion..."
-            className="flex-1 text-sm bg-transparent outline-none placeholder:text-slate-400" />
-          <kbd className="px-1.5 py-0.5 text-xs font-bold text-slate-400 bg-slate-100 rounded border border-slate-200">ESC</kbd>
+            className="flex-1 text-sm bg-transparent outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500 text-slate-900 dark:text-slate-100" />
+          <kbd className="px-1.5 py-0.5 text-xs font-bold text-slate-400 bg-slate-100 dark:bg-slate-700 rounded border border-slate-200 dark:border-slate-600">ESC</kbd>
         </div>
 
         {/* Results */}
         <div ref={listRef} className="max-h-[50vh] overflow-y-auto">
           {filtered.length === 0 && (
-            <div className="py-8 text-center text-sm text-slate-400">Sin resultados para &quot;{query}&quot;</div>
+            <div className="py-8 text-center text-sm text-slate-400 dark:text-slate-500">Sin resultados para &quot;{query}&quot;</div>
           )}
 
           {grouped.ticket.length > 0 && (
             <div>
-              <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50">Tickets recientes</div>
+              <div className="px-4 py-2 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest bg-slate-50 dark:bg-slate-900/50">Tickets recientes</div>
               {grouped.ticket.map(renderItem)}
             </div>
           )}
 
           {grouped.action.length > 0 && (
             <div>
-              <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50">Acciones rapidas</div>
+              <div className="px-4 py-2 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest bg-slate-50 dark:bg-slate-900/50">Acciones rapidas</div>
               {grouped.action.map(renderItem)}
             </div>
           )}
 
           {grouped.nav.length > 0 && (
             <div>
-              <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50">Navegacion</div>
+              <div className="px-4 py-2 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest bg-slate-50 dark:bg-slate-900/50">Navegacion</div>
               {grouped.nav.map(renderItem)}
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-400">
+        <div className="px-4 py-2 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-between text-xs text-slate-400 dark:text-slate-500">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1">
-              <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-xs font-bold">↑</kbd>
-              <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-xs font-bold">↓</kbd>
+              <kbd className="px-1 py-0.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded text-xs font-bold">↑</kbd>
+              <kbd className="px-1 py-0.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded text-xs font-bold">↓</kbd>
               navegar
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-xs font-bold">↵</kbd>
+              <kbd className="px-1 py-0.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded text-xs font-bold">↵</kbd>
               seleccionar
             </span>
           </div>
           <span className="flex items-center gap-1">
-            <kbd className="px-1 py-0.5 bg-white border border-slate-200 rounded text-xs font-bold">ESC</kbd>
+            <kbd className="px-1 py-0.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded text-xs font-bold">ESC</kbd>
             cerrar
           </span>
         </div>

@@ -90,6 +90,12 @@ const IconSpinner = ({ className = "" }: { className?: string }) => (
   </svg>
 );
 
+const EMPTY_STATE_FEATURES = [
+  { icon: <IconShield size={18} className="text-primary" />, title: "Anonimizacion", desc: "Datos protegidos" },
+  { icon: <IconChat size={18} className="text-primary" />, title: "Asistente IA", desc: "Guia inteligente" },
+  { icon: <IconLock size={18} className="text-primary" />, title: "Cifrado AES-256", desc: "Extremo a extremo" },
+];
+
 interface Props {
   ticketId: number | null;
   boardTicket: BoardTicket | null;
@@ -133,11 +139,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
           <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Plataforma de Anonimizacion</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mb-8">Selecciona una incidencia del panel izquierdo para comenzar a trabajar de forma segura</p>
           <div className="grid grid-cols-3 gap-3">
-            {[
-              { icon: <IconShield size={18} className="text-primary" />, title: "Anonimizacion", desc: "Datos protegidos" },
-              { icon: <IconChat size={18} className="text-primary" />, title: "Asistente IA", desc: "Guia inteligente" },
-              { icon: <IconLock size={18} className="text-primary" />, title: "Cifrado AES-256", desc: "Extremo a extremo" },
-            ].map((f, i) => (
+            {EMPTY_STATE_FEATURES.map((f, i) => (
               <div key={i} className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm text-center">
                 <div className="w-10 h-10 mx-auto mb-2 bg-primary/10 rounded-lg flex items-center justify-center">{f.icon}</div>
                 <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 mb-0.5">{f.title}</p>
@@ -327,7 +329,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
       <div className="p-6 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
         <div className="relative mb-4">
           <label htmlFor="chat-input" className="sr-only">Mensaje al agente IA</label>
-          <textarea id="chat-input" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
+          <textarea id="chat-input" name="chat-message" autoComplete="off" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
             placeholder="Escribe tu mensaje..." disabled={isStreaming} rows={2}
             className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 pr-14 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-primary focus:border-transparent transition-all outline-none resize-none disabled:opacity-50 placeholder:text-slate-400 dark:placeholder:text-slate-500" />
           <button onClick={() => handleSend()} disabled={isStreaming || !input.trim()} aria-label="Enviar mensaje"
@@ -337,7 +339,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
         </div>
         <div className="flex items-center justify-between">
           <div className="flex gap-2">
-            <button className="p-2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors" title="Adjuntar archivo">
+            <button aria-label="Adjuntar archivo" className="p-2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
               <IconClip />
             </button>
           </div>
