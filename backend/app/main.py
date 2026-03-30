@@ -107,6 +107,7 @@ def _create_connector_from_config(config: dict) -> "TicketConnector":
             token=token,
             project=project,
             issue_type_id=extra.get("issue_type_id", settings.kosin_issue_type_id),
+            extra_config=extra,
         )
     elif connector_type == "remedy":
         from .connectors.remedy import RemedyConnector

@@ -9,12 +9,31 @@ from ..config import settings
 
 logger = structlog.get_logger()
 
-# Transition IDs for KOSIN workflow (discovered from real API)
-TRANSITIONS = {
+
+def _jql_escape(value: str) -> str:
+    """Escape a string value for safe interpolation into JQL queries.
+
+    Prevents JQL injection by escaping characters that have special meaning
+    in Jira Query Language string literals.
+    """
+    # JQL string literals use backslash escaping inside double quotes
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
+
+# Default transition IDs — override via extra_config.transitions per instance
+_DEFAULT_TRANSITIONS = {
     "in_progress": "161",
     "delivered": "181",
-    "done": "191",      # "Close" -> Closed
+    "done": "191",
     "closed": "191",
+}
+
+# Default standalone issue type — override via extra_config.standalone_issue_type_id
+_DEFAULT_STANDALONE_ISSUE_TYPE_ID = "10601"
+
+# Default custom fields for standalone tickets — override via extra_config.custom_fields
+_DEFAULT_CUSTOM_FIELDS = {
+    "customfield_24800": {"id": "26801"},  # Billable: No
+    "customfield_12800": 1,               # Number of client requests
 }
 
 
@@ -27,6 +46,7 @@ class KosinConnector(TicketConnector):
         token: str = None,
         project: str = None,
         issue_type_id: str = None,
+        extra_config: dict = None,
     ):
         self.base_url = (base_url or settings.kosin_url).rstrip("/")
         self.token = token or settings.kosin_token
@@ -38,6 +58,12 @@ class KosinConnector(TicketConnector):
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
+
+        # Instance-specific config from extra_config (DB-driven, editable from UI)
+        extra = extra_config or {}
+        self._transitions = {**_DEFAULT_TRANSITIONS, **(extra.get("transitions") or {})}
+        self._standalone_issue_type_id = extra.get("standalone_issue_type_id") or _DEFAULT_STANDALONE_ISSUE_TYPE_ID
+        self._custom_fields = extra.get("custom_fields") or _DEFAULT_CUSTOM_FIELDS
 
     async def get_ticket(self, ticket_id: str) -> Dict:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -118,18 +144,18 @@ class KosinConnector(TicketConnector):
                 }
             }
         else:
-            # Standalone Support ticket (10601)
-            payload = {
-                "fields": {
-                    "project": {"key": self.project},
-                    "summary": summary,
-                    "description": description,
-                    "issuetype": {"id": "10601"},  # Support
-                    "priority": {"name": priority},
-                    "customfield_24800": {"id": "26801"},  # Billable: No
-                    "customfield_12800": 1,  # Number of client requests
-                }
+            # Standalone ticket (issue type and custom fields from config)
+            fields = {
+                "project": {"key": self.project},
+                "summary": summary,
+                "description": description,
+                "issuetype": {"id": self._standalone_issue_type_id},
+                "priority": {"name": priority},
             }
+            # Apply instance-specific custom fields
+            for field_id, field_val in self._custom_fields.items():
+                fields[field_id] = field_val
+            payload = {"fields": fields}
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -155,9 +181,10 @@ class KosinConnector(TicketConnector):
     async def find_anon_ticket(self, source_key: str) -> Optional[str]:
         """Check if an [ANON] ticket already exists in KOSIN for the given source key.
         Returns the KOSIN key if found, None otherwise."""
+        safe_key = _jql_escape(source_key)
         jql = (
             f'project={self.project} '
-            f'AND summary ~ "ANON" AND summary ~ "{source_key}"'
+            f'AND summary ~ "ANON" AND summary ~ "{safe_key}"'
         )
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -204,7 +231,7 @@ class KosinConnector(TicketConnector):
 
     async def update_status(self, ticket_id: str, status: str) -> bool:
         """Update ticket status via transitions."""
-        transition_id = TRANSITIONS.get(status.lower())
+        transition_id = self._transitions.get(status.lower())
         if not transition_id:
             logger.warning("kosin_unknown_transition", status=status)
             return False
@@ -255,24 +282,24 @@ class KosinConnector(TicketConnector):
         jql_parts = [f'project={self.project}']
 
         if filters.status:
-            status_str = ", ".join(f'"{s}"' for s in filters.status)
+            status_str = ", ".join(f'"{_jql_escape(s)}"' for s in filters.status)
             jql_parts.append(f'status in ({status_str})')
         else:
             jql_parts.append('status in (Open, "In Progress", "To Do")')
 
         if filters.priority:
-            priority_str = ", ".join(f'"{p}"' for p in filters.priority)
+            priority_str = ", ".join(f'"{_jql_escape(p)}"' for p in filters.priority)
             jql_parts.append(f'priority in ({priority_str})')
 
         if filters.issue_type:
-            type_str = ", ".join(f'"{t}"' for t in filters.issue_type)
+            type_str = ", ".join(f'"{_jql_escape(t)}"' for t in filters.issue_type)
             jql_parts.append(f'issuetype in ({type_str})')
 
         if filters.date_from:
-            jql_parts.append(f'created >= "{filters.date_from}"')
+            jql_parts.append(f'created >= "{_jql_escape(filters.date_from)}"')
 
         if filters.date_to:
-            jql_parts.append(f'created <= "{filters.date_to}"')
+            jql_parts.append(f'created <= "{_jql_escape(filters.date_to)}"')
 
         jql = " AND ".join(jql_parts) + " ORDER BY created DESC"
 

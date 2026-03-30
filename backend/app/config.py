@@ -38,8 +38,9 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
 
     # Axet (NTT Data OpenAI proxy)
+    axet_base_url: str = Field(default="https://axet.nttdata.com", description="Axet platform base URL")
     axet_bearer_token: str = Field(default="", description="Axet Bearer token for authentication")
-    axet_asset_id: str = Field(default="d9d2cf40-2036-4195-97bb-255f011fd1d4", description="Axet asset ID")
+    axet_asset_id: str = Field(default="", description="Axet asset ID")
     axet_project_id: str = Field(default="", description="Axet project ID")
     axet_model: str = Field(default="gpt-4o-mini", description="Axet model name")
 

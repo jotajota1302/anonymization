@@ -21,8 +21,8 @@ logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/axet/auth", tags=["axet-auth"])
 
-AXET_BASE_URL = "https://axet.nttdata.com"
-AXET_LLM_BASE_URL = f"{AXET_BASE_URL}/api/llm-enabler/v2"
+def _axet_base_url() -> str:
+    return settings.axet_base_url.rstrip("/")
 OKTA_SCOPES = ["openid", "profile", "email", "offline_access"]
 TOKEN_EXPIRY_BUFFER_S = 30
 
@@ -285,7 +285,7 @@ async def list_axet_models():
     try:
         async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
             resp = await client.post(
-                f"{AXET_BASE_URL}/api/enabler-manager/v1/llm-models/search",
+                f"{_axet_base_url()}/api/enabler-manager/v1/llm-models/search",
                 json={
                     "search": {"modelType": "chat", "isPublic": True},
                     "pagination": {"size": 50, "page": 0},
@@ -331,7 +331,7 @@ async def list_axet_projects():
     try:
         async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
             resp = await client.post(
-                f"{AXET_BASE_URL}/api/core/v1/projects/search",
+                f"{_axet_base_url()}/api/core/v1/projects/search",
                 json={
                     "search": {"ids": user_projects},
                     "pagination": {"size": 50, "page": 0},
@@ -381,7 +381,7 @@ async def _fetch_axet_user(access_token: str) -> dict:
     try:
         async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
             resp = await client.get(
-                f"{AXET_BASE_URL}/api/core/v1/users/{okta_id}",
+                f"{_axet_base_url()}/api/core/v1/users/{okta_id}",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
         if resp.status_code == 200:

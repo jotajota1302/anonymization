@@ -397,7 +397,8 @@ class AnonymizationAgent:
             if not bearer_token:
                 raise ValueError("Axet bearer token no disponible. Inicia sesion con OKTA.")
             asset_id = kwargs.get("axet_asset_id", settings.axet_asset_id)
-            base_url = f"https://axet.nttdata.com/api/llm-enabler/v2/openai/ntt/{project_id}/v1"
+            axet_host = settings.axet_base_url.rstrip("/")
+            base_url = f"{axet_host}/api/llm-enabler/v2/openai/ntt/{project_id}/v1"
             default_headers = {
                 "Authorization": f"Bearer {bearer_token}",
                 "axet-asset-id": asset_id,
