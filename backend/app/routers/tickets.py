@@ -1,5 +1,6 @@
 """Ticket management API endpoints."""
 
+import json
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 import structlog
@@ -359,6 +360,49 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
 
     await _progress("creating_destination", 2, status="completed",
                     detail=kosin_id)
+
+    # --- Step 2.5: Redact image attachments and upload to destination ---
+    redacted_count = 0
+    source_attachments = source_ticket.get("attachments", []) or []
+    image_attachments = [
+        a for a in source_attachments
+        if (a.get("filename", "").rsplit(".", 1)[-1].lower() in ("jpg", "jpeg", "png", "bmp", "tiff", "tif"))
+    ]
+    if image_attachments:
+        anon_cfg_row = await db.get_system_config("anonymization")
+        anon_cfg = {}
+        if anon_cfg_row and anon_cfg_row.get("extra_config"):
+            try:
+                anon_cfg = json.loads(anon_cfg_row["extra_config"]) if isinstance(anon_cfg_row["extra_config"], str) else anon_cfg_row["extra_config"]
+            except Exception:
+                anon_cfg = {}
+        auto_redact = anon_cfg.get("auto_redact_attachments_on_ingest", True)
+        if auto_redact:
+            from ..services.attachment_processor import AttachmentProcessor
+            from ..services import redacted_cache
+            processor = AttachmentProcessor()
+            for attach in image_attachments:
+                filename = attach.get("filename", "unknown.png")
+                url = attach.get("content", "")
+                if not url:
+                    continue
+                try:
+                    raw = await source_connector.download_attachment(url)
+                    if not raw:
+                        continue
+                    redacted = processor.redact_image(raw)
+                    if redacted is None:
+                        logger.warning("redact_skipped_presidio_unavailable", filename=filename)
+                        break  # Presidio not installed — skip all
+                    redacted_cache.put(kosin_key, filename, redacted)
+                    out_name = filename.rsplit(".", 1)[0] + "_redacted.png"
+                    ok, err = await destination.upload_attachment(kosin_id, out_name, redacted, "image/png")
+                    if ok:
+                        redacted_count += 1
+                    else:
+                        logger.warning("redacted_upload_failed", filename=filename, error=err)
+                except Exception as e:
+                    logger.warning("redact_attachment_failed", filename=filename, error=str(e))
 
     # --- Step 3: Completed ---
     pii_total = len(sub_map)
@@ -780,6 +824,7 @@ async def get_redacted_attachment(ticket_id: int, attachment_index: int = 0):
     """
     from fastapi.responses import Response
     from ..services.attachment_processor import AttachmentProcessor
+    from ..services import redacted_cache
 
     state = _get_state()
     db = state["db"]
@@ -818,32 +863,41 @@ async def get_redacted_attachment(ticket_id: int, attachment_index: int = 0):
     if ext not in ("jpg", "jpeg", "png", "bmp", "tiff", "tif"):
         raise HTTPException(status_code=400, detail=f"Solo se pueden redactar imagenes, no '{ext}'")
 
-    content_url = attachment.get("content", "")
-    if not content_url:
-        raise HTTPException(status_code=404, detail="El adjunto no tiene URL de contenido")
+    # Try cache first
+    redacted_bytes = redacted_cache.get(source_ticket_id, filename)
+    cache_hit = redacted_bytes is not None
 
-    content_bytes = await connector.download_attachment(content_url)
-    if not content_bytes:
-        raise HTTPException(status_code=502, detail="No se pudo descargar el adjunto")
+    if not cache_hit:
+        content_url = attachment.get("content", "")
+        if not content_url:
+            raise HTTPException(status_code=404, detail="El adjunto no tiene URL de contenido")
 
-    processor = AttachmentProcessor()
-    redacted_bytes = processor.redact_image(content_bytes)
+        content_bytes = await connector.download_attachment(content_url)
+        if not content_bytes:
+            raise HTTPException(status_code=502, detail="No se pudo descargar el adjunto")
 
-    if redacted_bytes is None:
-        raise HTTPException(
-            status_code=501,
-            detail="Presidio Image Redactor no disponible. Instalar: pip install presidio-image-redactor"
-        )
+        processor = AttachmentProcessor()
+        redacted_bytes = processor.redact_image(content_bytes)
+
+        if redacted_bytes is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Presidio Image Redactor no disponible. Instalar: pip install presidio-image-redactor"
+            )
+        redacted_cache.put(source_ticket_id, filename, redacted_bytes)
 
     await db.add_audit_log(
         operator_id="operator",
         action="view_redacted_attachment",
         ticket_mapping_id=ticket_id,
-        details=f"attachment={filename}, index={attachment_index}",
+        details=f"attachment={filename}, index={attachment_index}, cache={'hit' if cache_hit else 'miss'}",
     )
 
     return Response(
         content=redacted_bytes,
         media_type="image/png",
-        headers={"Content-Disposition": f'inline; filename="redacted_{filename}.png"'},
+        headers={
+            "Content-Disposition": f'inline; filename="redacted_{filename}.png"',
+            "X-Cache": "HIT" if cache_hit else "MISS",
+        },
     )

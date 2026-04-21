@@ -570,6 +570,11 @@ _DEFAULT_ANON_CONFIG = {
         "license_plates": False,
     },
     "substitution_technique": "synthetic",
+    # Auto-redact image attachments (Presidio Image Redactor) at ingest time.
+    # When true, every image attachment on the source ticket is OCR-scanned,
+    # PII regions are blacked out, and the redacted PNG is attached to the
+    # anonymized destination ticket. Cached to disk to avoid reprocessing.
+    "auto_redact_attachments_on_ingest": True,
 }
 
 

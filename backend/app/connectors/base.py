@@ -84,3 +84,10 @@ class TicketConnector(ABC):
     async def get_ticket_status(self, ticket_id: str) -> str:
         """Get the current status name of a ticket in the remote system."""
         raise NotImplementedError(f"{type(self).__name__} does not support get_ticket_status")
+
+    async def upload_attachment(
+        self, ticket_id: str, filename: str, content: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> tuple[bool, Optional[str]]:
+        """Upload an attachment to a ticket. Returns (success, error_message)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support upload_attachment")

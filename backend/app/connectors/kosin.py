@@ -178,6 +178,42 @@ class KosinConnector(TicketConnector):
             logger.error("kosin_create_failed", error=error_msg, error_type=type(e).__name__)
             return None, error_msg
 
+    async def upload_attachment(
+        self, ticket_id: str, filename: str, content: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> tuple[bool, Optional[str]]:
+        """Attach a file to a Jira/KOSIN issue via REST API.
+
+        Jira requires:
+          - multipart/form-data with file field named 'file'
+          - X-Atlassian-Token: no-check header to bypass XSRF
+          - No Content-Type header (httpx sets the multipart boundary).
+        """
+        upload_headers = {
+            "Authorization": f"Bearer {self.token}",
+            "X-Atlassian-Token": "no-check",
+            "Accept": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self._api_base}/issue/{ticket_id}/attachments",
+                    headers=upload_headers,
+                    files={"file": (filename, content, content_type)},
+                )
+                resp.raise_for_status()
+                logger.info("kosin_attachment_uploaded", key=ticket_id, filename=filename, size=len(content))
+                return True, None
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response else "no response"
+            logger.error("kosin_upload_attachment_failed", key=ticket_id, filename=filename,
+                         status=e.response.status_code, body=body)
+            return False, f"HTTP {e.response.status_code}: {body}"
+        except httpx.HTTPError as e:
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_upload_attachment_failed", key=ticket_id, filename=filename, error=error_msg)
+            return False, error_msg
+
     async def find_anon_ticket(self, source_key: str) -> Optional[str]:
         """Check if an [ANON] ticket already exists in KOSIN for the given source key.
         Returns the KOSIN key if found, None otherwise."""
