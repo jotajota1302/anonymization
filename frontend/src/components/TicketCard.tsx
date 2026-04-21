@@ -45,10 +45,20 @@ export function TicketCard({ ticket, isSelected, onClick }: Props) {
       }`}
     >
       <div className="flex justify-between items-start mb-2">
-        <span className="text-sm font-bold text-primary">
-          [ANON] {ticket.kosin_id}
-        </span>
-        <div className="flex gap-1">
+        <div className="flex flex-col min-w-0">
+          <span className="text-sm font-bold text-primary truncate">
+            [ANON] {ticket.kosin_id}
+          </span>
+          {ticket.source_ticket_id && (
+            <span
+              className="text-[10px] font-mono text-slate-400 dark:text-slate-500 truncate"
+              title={`Ticket origen: ${ticket.source_ticket_id}`}
+            >
+              ← {ticket.source_ticket_id}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-1 shrink-0 ml-2">
           <span
             className={`w-1.5 h-1.5 rounded-full ${isActive ? "animate-pulse" : ""}`}
             style={{ backgroundColor: priority.color, boxShadow: `0 0 8px ${priority.shadow}` }}
