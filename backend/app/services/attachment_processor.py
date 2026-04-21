@@ -27,7 +27,7 @@ def _get_presidio_image_engines():
 
     try:
         from presidio_image_redactor import ImageRedactorEngine, ImageAnalyzerEngine
-        from presidio_analyzer import AnalyzerEngine
+        from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
         from presidio_analyzer.nlp_engine import SpacyNlpEngine
 
         # Use Spanish spaCy model for NER in images
@@ -38,6 +38,65 @@ def _get_presidio_image_engines():
             nlp_engine=nlp_engine,
             supported_languages=["es"],
         )
+
+        # Register Spanish DNI/NIF/NIE/CIF + IBAN + phone + date recognizers.
+        # The default PresidioAnalyzer ships English ones; we need Spanish forms
+        # for OCR text extracted from DNI / payroll / invoice images.
+        spanish_id_recognizer = PatternRecognizer(
+            supported_entity="ES_DNI",
+            supported_language="es",
+            patterns=[
+                Pattern(
+                    "DNI_NIF",
+                    r"(?i)(?:(?:DNI|NIF|NIE|NI|CIF)[:\s.\-]*)?\b\d{1,2}[\s.\-]?\d{3}[\s.\-]?\d{3}[\s.\-]?[A-Za-z]\b",
+                    0.85,
+                ),
+                Pattern(
+                    "NIE",
+                    r"(?i)(?:(?:NIE|NI)[:\s.\-]*)?\b[XYZxyz][\s.\-]?\d{1,2}[\s.\-]?\d{3}[\s.\-]?\d{3}[\s.\-]?[A-Za-z]\b",
+                    0.85,
+                ),
+                Pattern(
+                    "CIF",
+                    r"(?i)(?:CIF[:\s.\-]*)?\b[A-Ha-h]\d{7}[0-9A-Ja-j]\b",
+                    0.80,
+                ),
+            ],
+        )
+        analyzer.registry.add_recognizer(spanish_id_recognizer)
+
+        date_recognizer = PatternRecognizer(
+            supported_entity="DATE_TIME",
+            supported_language="es",
+            patterns=[
+                Pattern("date_slash", r"\b\d{1,2}[/\-. ]\d{1,2}[/\-. ]\d{2,4}\b", 0.60),
+                Pattern("date_spaced", r"\b\d{1,2}\s\d{1,2}\s\d{4}\b", 0.55),
+            ],
+        )
+        analyzer.registry.add_recognizer(date_recognizer)
+
+        iban_recognizer = PatternRecognizer(
+            supported_entity="IBAN_CODE",
+            supported_language="es",
+            patterns=[
+                Pattern("iban_es", r"\bES\d{2}[\s]?\d{4}[\s]?\d{4}[\s]?\d{2}[\s]?\d{10}\b", 0.90),
+            ],
+        )
+        analyzer.registry.add_recognizer(iban_recognizer)
+
+        phone_recognizer = PatternRecognizer(
+            supported_entity="PHONE_NUMBER",
+            supported_language="es",
+            patterns=[
+                Pattern(
+                    "phone_es",
+                    r"(?<!\d)(?:\+34|0034)?\s?[6-9]\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3}(?!\d)",
+                    0.80,
+                ),
+            ],
+        )
+        analyzer.registry.add_recognizer(phone_recognizer)
+
         _image_analyzer_engine = ImageAnalyzerEngine(analyzer_engine=analyzer)
         _image_redactor_engine = ImageRedactorEngine(
             image_analyzer_engine=_image_analyzer_engine,
@@ -81,6 +140,29 @@ class AttachmentProcessor:
         else:
             return self._extract_plaintext(content), "plaintext"
 
+    # Tesseract struggles with small images: below this short-edge threshold,
+    # we upscale with Lanczos before running OCR. 1200 px gives ~300 DPI
+    # equivalent for a DNI-sized document.
+    _MIN_OCR_SHORT_EDGE = 1200
+
+    def _prepare_ocr_image(self, content: bytes):
+        """Open and conditionally upscale an image for OCR quality.
+
+        Returns (pil_image, scale) where scale is the factor applied
+        (1.0 means no upscale). The scale lets callers keep redacted
+        images at the upscaled resolution — the black boxes align with
+        the upscaled OCR coordinates.
+        """
+        from PIL import Image
+        image = Image.open(io.BytesIO(content))
+        short = min(image.size)
+        if short and short < self._MIN_OCR_SHORT_EDGE:
+            scale = max(2.0, self._MIN_OCR_SHORT_EDGE / short)
+            new_size = (int(image.size[0] * scale), int(image.size[1] * scale))
+            image = image.resize(new_size, Image.LANCZOS)
+            return image, scale
+        return image, 1.0
+
     def redact_image(self, content: bytes, fill_color: Tuple[int, int, int] = (0, 0, 0)) -> Optional[bytes]:
         """Redact PII from an image using Presidio Image Redactor.
 
@@ -96,8 +178,7 @@ class AttachmentProcessor:
             return None
 
         try:
-            from PIL import Image
-            image = Image.open(io.BytesIO(content))
+            image, scale = self._prepare_ocr_image(content)
             redacted = redactor.redact(
                 image,
                 fill=fill_color,
@@ -106,7 +187,7 @@ class AttachmentProcessor:
             )
             buf = io.BytesIO()
             redacted.save(buf, format="PNG")
-            logger.info("image_redacted_successfully")
+            logger.info("image_redacted_successfully", scale=scale, size=image.size)
             return buf.getvalue()
         except Exception as e:
             logger.error("image_redaction_failed", error=str(e))
@@ -127,8 +208,7 @@ class AttachmentProcessor:
             return []
 
         try:
-            from PIL import Image
-            image = Image.open(io.BytesIO(content))
+            image, scale = self._prepare_ocr_image(content)
             results = analyzer.analyze(
                 image,
                 ocr_kwargs={"lang": "spa+eng"},
@@ -145,7 +225,7 @@ class AttachmentProcessor:
                     "width": r.width,
                     "height": r.height,
                 })
-            logger.info("image_analyzed", entities_found=len(entities))
+            logger.info("image_analyzed", entities_found=len(entities), scale=scale)
             return entities
         except Exception as e:
             logger.error("image_analysis_failed", error=str(e))
