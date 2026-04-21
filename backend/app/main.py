@@ -266,7 +266,26 @@ async def lifespan(app: FastAPI):
             logger.warning("anon_llm_init_failed", error=str(e), hint="PII filtering will use regex/Presidio only")
             anon_llm = None
 
-    # Resolution Agent (main LLM for chat + tools)
+    # Resolution Agent (main LLM for chat + tools).
+    # Agent config (provider / model / axet_project_id / axet_asset_id) lives
+    # in the system_config table; propagate it into settings so that
+    # AnonymizationAgent._create_llm() picks the right Axet project on startup
+    # instead of failing because the .env has no axet_project_id.
+    try:
+        import json as _json
+        agent_row = await db.get_system_config("agent")
+        if agent_row and agent_row.get("extra_config"):
+            raw = agent_row["extra_config"]
+            cfg = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+            if cfg.get("axet_project_id"):
+                settings.axet_project_id = cfg["axet_project_id"]
+            if cfg.get("axet_asset_id"):
+                settings.axet_asset_id = cfg["axet_asset_id"]
+            if cfg.get("model"):
+                settings.axet_model = cfg["model"]
+    except Exception as e:
+        logger.warning("agent_config_prewarm_failed", error=str(e))
+
     try:
         from .services.agent import AnonymizationAgent
         agent = AnonymizationAgent(
@@ -279,7 +298,7 @@ async def lifespan(app: FastAPI):
         logger.info("resolution_agent_initialized", provider=settings.llm_provider)
     except Exception as e:
         logger.warning("agent_init_failed", error=str(e),
-                       hint="Set LLM provider env vars for agent functionality")
+                       hint="Inicia sesion OKTA en /config para obtener un token Axet valido")
         app_state["agent"] = None
 
     # Start Axet token auto-refresh background task

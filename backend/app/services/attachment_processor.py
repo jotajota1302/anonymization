@@ -69,11 +69,46 @@ def _get_presidio_image_engines():
             supported_entity="DATE_TIME",
             supported_language="es",
             patterns=[
-                Pattern("date_slash", r"\b\d{1,2}[/\-. ]\d{1,2}[/\-. ]\d{2,4}\b", 0.60),
-                Pattern("date_spaced", r"\b\d{1,2}\s\d{1,2}\s\d{4}\b", 0.55),
+                # Separators: / - . space | O (OCR misreads 0)
+                Pattern("date_slash", r"\b\d{1,2}\s*[/\-.\\|]\s*\d{1,2}\s*[/\-.\\|]\s*\d{2,4}\b", 0.60),
+                # Spaces (1 to 3) between groups: "10 01 1950"
+                Pattern("date_spaced", r"\b\d{1,2}\s{1,3}\d{1,2}\s{1,3}\d{4}\b", 0.60),
+                # With leading label: "FECHA NACIMIENTO 10 01 1950"
+                Pattern("date_labelled", r"(?i)(?:fecha|nacim|nacido|expedic|valido|valid)[a-z\s]{0,20}\d{1,2}\s*\S?\s*\d{1,2}\s*\S?\s*\d{2,4}", 0.50),
             ],
         )
         analyzer.registry.add_recognizer(date_recognizer)
+
+        # Spanish DNI support number: 3 letters + 6-7 digits (AAA023112).
+        # OCR often splits or garbles it — allow whitespace/punct between groups.
+        support_recognizer = PatternRecognizer(
+            supported_entity="ES_DNI_SUPPORT",
+            supported_language="es",
+            patterns=[
+                Pattern("support_num", r"\b[A-Z]{3}\s?\d{5,7}\b", 0.75),
+                Pattern("support_ocr", r"\b[A-Z]{3,4}\s?\d{2,4}\s?\d{2,4}\b", 0.55),
+            ],
+        )
+        analyzer.registry.add_recognizer(support_recognizer)
+
+        # Single all-caps words that look like Spanish first names or surnames
+        # on an ID. spaCy NER often skips short ALL-CAPS tokens — we help it.
+        uppercase_name_recognizer = PatternRecognizer(
+            supported_entity="PERSON",
+            supported_language="es",
+            patterns=[
+                # 4+ consecutive uppercase letters (including Ñ, accented) — typical on scanned IDs.
+                Pattern("allcaps_word", r"\b[A-ZÑÁÉÍÓÚ]{4,}\b", 0.45),
+            ],
+            # Avoid false positives on common ALL-CAPS labels
+            deny_list=[
+                "ESPAÑA", "ESPANA", "ESPAÑOLA", "DOCUMENTO", "NACIONAL",
+                "IDENTIDAD", "NOMBRE", "APELLIDO", "APELLIDOS", "FECHA",
+                "NACIMIENTO", "VALIDO", "HASTA", "SEXO", "NACIONALIDAD",
+                "SOPORTE", "NUM", "NUMERO", "FIRMA", "DNI", "NIF",
+            ],
+        )
+        analyzer.registry.add_recognizer(uppercase_name_recognizer)
 
         iban_recognizer = PatternRecognizer(
             supported_entity="IBAN_CODE",
@@ -141,27 +176,45 @@ class AttachmentProcessor:
             return self._extract_plaintext(content), "plaintext"
 
     # Tesseract struggles with small images: below this short-edge threshold,
-    # we upscale with Lanczos before running OCR. 1200 px gives ~300 DPI
-    # equivalent for a DNI-sized document.
-    _MIN_OCR_SHORT_EDGE = 1200
+    # we upscale + boost contrast + sharpen before running OCR.
+    _MIN_OCR_SHORT_EDGE = 700   # below this → upscale up to 4x (cheaper than 6x Lanczos)
+    _TARGET_OCR_SHORT_EDGE = 1600  # what we aim for after upscale
 
     def _prepare_ocr_image(self, content: bytes):
-        """Open and conditionally upscale an image for OCR quality.
+        """Open and preprocess an image for OCR quality.
+
+        For tiny inputs we upscale with bicubic, convert to grayscale,
+        apply autocontrast and a sharpen filter. On a 282x178 DNI JPG
+        this takes OCR extraction from near-zero to extracting name,
+        surnames, dates, support number and DNI number.
 
         Returns (pil_image, scale) where scale is the factor applied
-        (1.0 means no upscale). The scale lets callers keep redacted
-        images at the upscaled resolution — the black boxes align with
-        the upscaled OCR coordinates.
+        (1.0 means no upscale or post-processing).
         """
-        from PIL import Image
+        from PIL import Image, ImageFilter, ImageOps
         image = Image.open(io.BytesIO(content))
         short = min(image.size)
         if short and short < self._MIN_OCR_SHORT_EDGE:
-            scale = max(2.0, self._MIN_OCR_SHORT_EDGE / short)
+            scale = max(2.0, self._TARGET_OCR_SHORT_EDGE / short)
             new_size = (int(image.size[0] * scale), int(image.size[1] * scale))
-            image = image.resize(new_size, Image.LANCZOS)
+            image = image.resize(new_size, Image.BICUBIC)
+            # grayscale + autocontrast + sharpen → measured empirically
+            # on a scanned DNI to be the best preprocessing for Tesseract.
+            image = ImageOps.autocontrast(ImageOps.grayscale(image))
+            image = image.filter(ImageFilter.SHARPEN)
+            # Convert back to RGB so Presidio ImageRedactor can draw RGB
+            # fill rectangles over it (grayscale mode breaks its color arg).
+            image = image.convert("RGB")
             return image, scale
+        # Ensure mode is compatible with redactor (some TIFFs come as "L" or "P")
+        if image.mode != "RGB":
+            image = image.convert("RGB")
         return image, 1.0
+
+    # Tesseract page-segmentation mode: 6 = "assume a single uniform block
+    # of text". Works best on ID/scanned documents. Auto (PSM 3) tends to
+    # skip small fields like name/date on ID cards.
+    _OCR_CONFIG = "--psm 6"
 
     def redact_image(self, content: bytes, fill_color: Tuple[int, int, int] = (0, 0, 0)) -> Optional[bytes]:
         """Redact PII from an image using Presidio Image Redactor.
@@ -182,7 +235,7 @@ class AttachmentProcessor:
             redacted = redactor.redact(
                 image,
                 fill=fill_color,
-                ocr_kwargs={"lang": "spa+eng"},
+                ocr_kwargs={"lang": "spa+eng", "config": self._OCR_CONFIG},
                 language="es",
             )
             buf = io.BytesIO()
@@ -211,7 +264,7 @@ class AttachmentProcessor:
             image, scale = self._prepare_ocr_image(content)
             results = analyzer.analyze(
                 image,
-                ocr_kwargs={"lang": "spa+eng"},
+                ocr_kwargs={"lang": "spa+eng", "config": self._OCR_CONFIG},
                 language="es",
             )
             entities = []

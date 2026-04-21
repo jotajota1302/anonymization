@@ -427,10 +427,26 @@ async def update_agent_config(body: AgentConfigUpdate):
         state["system_prompt"] = body.system_prompt
         logger.info("system_prompt_hot_reloaded", length=len(body.system_prompt))
 
-    # Hot-reload LLM if provider or model changed
-    if body.provider is not None or body.model is not None or body.temperature is not None:
+    # Hot-reload LLM if provider or model changed, or revive a null agent
+    if body.provider is not None or body.model is not None or body.temperature is not None or body.axet_project_id is not None or body.axet_asset_id is not None:
         agent = state.get("agent")
-        if agent:
+        if agent is None:
+            # Agent failed to init at startup (e.g. no Axet token yet). Try
+            # to build it now that credentials might be present.
+            try:
+                from ..services.agent import AnonymizationAgent
+                agent = AnonymizationAgent(
+                    anonymizer=state["anonymizer"],
+                    db=db,
+                    ws_manager=state["ws_manager"],
+                    anon_llm=state.get("anon_llm"),
+                )
+                state["agent"] = agent
+                logger.info("agent_revived", provider=config.get("provider"), model=config.get("model"))
+            except Exception as e:
+                logger.error("agent_revive_failed", error=str(e))
+                return {**config, "warning": f"Config guardada pero no se pudo inicializar el agente: {str(e)}"}
+        else:
             try:
                 agent.update_llm(
                     provider=config["provider"],
@@ -513,7 +529,24 @@ async def test_agent_connection(body: TestConnectionRequest):
         response = await llm.ainvoke([HumanMessage(content="Responde solo: OK")])
         content = response.content if hasattr(response, "content") else str(response)
 
-        return {"success": True, "message": f"Conexion exitosa con {body.provider}/{model}", "response": content[:100]}
+        # If the agent failed to initialize at startup (no token yet) but the
+        # test succeeded, revive it so subsequent ingests/chats work without
+        # forcing the operator to save config first.
+        state = _get_app_state()
+        if state.get("agent") is None:
+            try:
+                agent = AnonymizationAgent(
+                    anonymizer=state["anonymizer"],
+                    db=state["db"],
+                    ws_manager=state["ws_manager"],
+                    anon_llm=state.get("anon_llm"),
+                )
+                state["agent"] = agent
+                logger.info("agent_revived_from_test_connection", provider="axet", model=model)
+            except Exception as rev_e:
+                logger.warning("agent_revive_skipped", error=str(rev_e))
+
+        return {"success": True, "message": f"Conexion exitosa con axet/{model}", "response": content[:100]}
     except Exception as e:
         logger.error("test_connection_failed", provider=body.provider, model=model, error=repr(e))
         return {"success": False, "message": f"Error de conexion: {str(e)}"}

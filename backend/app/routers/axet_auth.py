@@ -168,6 +168,24 @@ async def poll_for_token():
 
             logger.info("axet_device_login_success", user=user_info.get("displayName", "unknown"))
 
+            # Revive the resolution agent if it failed to init at startup
+            # because the Axet token wasn't present yet. Logging in via OKTA
+            # should be enough to make it ready without extra manual steps.
+            try:
+                from ..main import app_state
+                if app_state.get("agent") is None and app_state.get("db"):
+                    from ..services.agent import AnonymizationAgent
+                    agent = AnonymizationAgent(
+                        anonymizer=app_state["anonymizer"],
+                        db=app_state["db"],
+                        ws_manager=app_state["ws_manager"],
+                        anon_llm=app_state.get("anon_llm"),
+                    )
+                    app_state["agent"] = agent
+                    logger.info("agent_revived_after_okta_login", provider="axet")
+            except Exception as rev_e:
+                logger.warning("agent_revive_after_login_failed", error=str(rev_e))
+
             return {
                 "status": "success",
                 "user": user_info,
@@ -229,6 +247,23 @@ async def refresh_token():
             _token_store["refresh_token"] = token_data["refresh_token"]
 
         settings.axet_bearer_token = token_data["access_token"]
+
+        # Same revive-agent hook as login: if the agent is None (startup
+        # failed because no token), now that we have one, build it.
+        try:
+            from ..main import app_state
+            if app_state.get("agent") is None and app_state.get("db"):
+                from ..services.agent import AnonymizationAgent
+                agent = AnonymizationAgent(
+                    anonymizer=app_state["anonymizer"],
+                    db=app_state["db"],
+                    ws_manager=app_state["ws_manager"],
+                    anon_llm=app_state.get("anon_llm"),
+                )
+                app_state["agent"] = agent
+                logger.info("agent_revived_after_token_refresh", provider="axet")
+        except Exception as rev_e:
+            logger.warning("agent_revive_after_refresh_failed", error=str(rev_e))
 
         logger.info("axet_token_refreshed", expires_in=token_data.get("expires_in"))
         return {"success": True, "expires_in": token_data.get("expires_in", 3600)}
