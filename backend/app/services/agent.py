@@ -642,8 +642,35 @@ class AnonymizationAgent:
                     agent_text = response.content
 
             except Exception as e:
-                logger.error("agent_error", error=str(e), ticket_id=ticket_id)
-                agent_text = f"Error al procesar la solicitud. Por favor, intenta de nuevo."
+                # Log full traceback so k8s logs show the real cause.
+                logger.error(
+                    "agent_error",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    ticket_id=ticket_id,
+                    exc_info=True,
+                )
+                msg = str(e).lower()
+                if "401" in msg or "unauthorized" in msg or "invalid_token" in msg or "expired" in msg:
+                    agent_text = (
+                        "La sesion con el LLM (Axet) ha caducado. "
+                        "Refresca la pagina o vuelve a iniciar sesion en /config."
+                    )
+                elif "timeout" in msg or "timed out" in msg:
+                    agent_text = (
+                        "El modelo ha tardado demasiado en responder. "
+                        "Intenta de nuevo en unos segundos."
+                    )
+                elif "connection" in msg or "connecterror" in msg or "network" in msg:
+                    agent_text = (
+                        "Error de red contactando con el LLM. "
+                        "Comprueba la conectividad e intenta de nuevo."
+                    )
+                else:
+                    agent_text = (
+                        f"Error procesando la solicitud ({type(e).__name__}). "
+                        f"Revisa los logs del backend y reintenta."
+                    )
                 await self.ws_manager.send_error(client_id, agent_text, ticket_id)
                 return agent_text
 
