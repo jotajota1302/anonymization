@@ -338,8 +338,8 @@ async def _get_agent_config(db) -> dict:
         elif isinstance(raw, dict):
             return raw
     defaults = {
-        "provider": s.llm_provider,
-        "model": s.ollama_model if s.llm_provider == "ollama" else (s.openai_model if s.llm_provider == "openai" else s.axet_model),
+        "provider": "axet",
+        "model": s.axet_model,
         "temperature": 0.3,
         "tools": {t["name"]: True for t in _ALL_TOOLS_META},
     }
@@ -370,40 +370,19 @@ async def get_agent_config():
     ]
 
     result = {
-        "provider": config.get("provider", s.llm_provider),
-        "model": config.get("model", s.ollama_model),
+        "provider": "axet",
+        "model": config.get("model", s.axet_model),
         "temperature": config.get("temperature", 0.3),
         "system_prompt": state.get("system_prompt", ""),
-        "available_providers": ["ollama", "openai", "axet"],
+        "available_providers": ["axet"],
         "tools": tools_list,
-        "ollama_config": {
-            "base_url": s.ollama_base_url,
-            "available_models": [],
-        },
-        "openai_config": {
-            "api_key_masked": _mask_token(s.openai_api_key),
-            "model": s.openai_model,
-            "available_models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-        },
         "axet_config": {
             "token_masked": _mask_token(s.axet_bearer_token),
             "asset_id": config.get("axet_asset_id", s.axet_asset_id),
             "project_id": config.get("axet_project_id", s.axet_project_id),
-            "model": config.get("model", s.axet_model) if config.get("provider") == "axet" else s.axet_model,
+            "model": config.get("model", s.axet_model),
         },
     }
-
-    # Fetch available Ollama models
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{s.ollama_base_url}/api/tags")
-            if resp.status_code == 200:
-                data = resp.json()
-                result["ollama_config"]["available_models"] = [
-                    m.get("name", m.get("model", "")) for m in data.get("models", [])
-                ]
-    except Exception:
-        pass
 
     return result
 
@@ -500,10 +479,9 @@ async def get_default_prompt():
 
 
 class TestConnectionRequest(BaseModel):
-    provider: str
+    provider: str = "axet"
     model: Optional[str] = None
     api_key: Optional[str] = None
-    ollama_base_url: Optional[str] = None
     axet_bearer_token: Optional[str] = None
     axet_asset_id: Optional[str] = None
     axet_project_id: Optional[str] = None
@@ -511,28 +489,20 @@ class TestConnectionRequest(BaseModel):
 
 @router.post("/agent/test-connection")
 async def test_agent_connection(body: TestConnectionRequest):
-    """Test LLM connection with given provider config."""
+    """Test Axet LLM connection with given config."""
     from ..services.agent import AnonymizationAgent
     from ..config import settings as s
 
     try:
-        kwargs = {}
-        model = body.model
-
-        if body.provider == "openai":
-            kwargs["openai_api_key"] = body.api_key or s.openai_api_key
-            model = model or s.openai_model
-        elif body.provider == "axet":
-            kwargs["axet_bearer_token"] = body.axet_bearer_token or s.axet_bearer_token
-            kwargs["axet_asset_id"] = body.axet_asset_id or s.axet_asset_id
-            kwargs["axet_project_id"] = body.axet_project_id or s.axet_project_id
-            model = model or s.axet_model
-        elif body.provider == "ollama":
-            kwargs["ollama_base_url"] = body.ollama_base_url or s.ollama_base_url
-            model = model or s.ollama_model
+        kwargs = {
+            "axet_bearer_token": body.axet_bearer_token or s.axet_bearer_token,
+            "axet_asset_id": body.axet_asset_id or s.axet_asset_id,
+            "axet_project_id": body.axet_project_id or s.axet_project_id,
+        }
+        model = body.model or s.axet_model
 
         llm = AnonymizationAgent._create_llm(
-            provider=body.provider,
+            provider="axet",
             model=model,
             temperature=0.1,
             **kwargs,
@@ -550,23 +520,16 @@ async def test_agent_connection(body: TestConnectionRequest):
 
 
 class UpdateApiKeyRequest(BaseModel):
-    provider: str
+    provider: str = "axet"
     api_key: str
 
 
 @router.put("/agent/api-key")
 async def update_agent_api_key(body: UpdateApiKeyRequest):
-    """Update API key for a provider (runtime only, does not persist to .env)."""
+    """Update Axet bearer token (runtime only, does not persist to .env)."""
     from ..config import settings as s
-
-    if body.provider == "openai":
-        s.openai_api_key = body.api_key
-    elif body.provider == "axet":
-        s.axet_bearer_token = body.api_key
-    else:
-        raise HTTPException(status_code=400, detail=f"Provider '{body.provider}' no soporta API key")
-
-    return {"success": True, "message": f"API key actualizada para {body.provider}"}
+    s.axet_bearer_token = body.api_key
+    return {"success": True, "message": "Bearer token Axet actualizado"}
 
 
 # --- Anonymization settings endpoints ---
@@ -897,14 +860,12 @@ async def update_anon_llm_config(body: AnonLlmUpdate):
             from ..config import settings as s
             custom_prompt = config.get("system_prompt", "") or ANON_LLM_SYSTEM_PROMPT
 
-            # Build provider-specific kwargs
-            llm_kwargs = {}
-            if config["provider"] == "axet":
-                llm_kwargs["axet_bearer_token"] = s.axet_bearer_token
-                llm_kwargs["axet_asset_id"] = config.get("axet_asset_id") or s.axet_asset_id
-                llm_kwargs["axet_project_id"] = config.get("axet_project_id") or s.axet_project_id
-            elif config["provider"] == "openai":
-                llm_kwargs["openai_api_key"] = config.get("api_key") or s.openai_api_key
+            # Only Axet provider supported
+            llm_kwargs = {
+                "axet_bearer_token": s.axet_bearer_token,
+                "axet_asset_id": config.get("axet_asset_id") or s.axet_asset_id,
+                "axet_project_id": config.get("axet_project_id") or s.axet_project_id,
+            }
 
             existing = state.get("anon_llm")
             if existing:
@@ -944,28 +905,20 @@ async def update_anon_llm_config(body: AnonLlmUpdate):
 
 @router.post("/anon-llm/test-connection")
 async def test_anon_llm_connection(body: TestConnectionRequest):
-    """Test Anonymization LLM connection with given provider config."""
+    """Test Anonymization LLM (Axet) connection with given config."""
     from ..services.agent import AnonymizationAgent
     from ..config import settings as s
 
     try:
-        kwargs = {}
-        model = body.model
-
-        if body.provider == "openai":
-            kwargs["openai_api_key"] = body.api_key or s.openai_api_key
-            model = model or s.openai_model
-        elif body.provider == "axet":
-            kwargs["axet_bearer_token"] = body.axet_bearer_token or s.axet_bearer_token
-            kwargs["axet_asset_id"] = body.axet_asset_id or s.axet_asset_id
-            kwargs["axet_project_id"] = body.axet_project_id or s.axet_project_id
-            model = model or s.axet_model
-        elif body.provider == "ollama":
-            kwargs["ollama_base_url"] = body.ollama_base_url or s.ollama_base_url
-            model = model or s.ollama_model
+        kwargs = {
+            "axet_bearer_token": body.axet_bearer_token or s.axet_bearer_token,
+            "axet_asset_id": body.axet_asset_id or s.axet_asset_id,
+            "axet_project_id": body.axet_project_id or s.axet_project_id,
+        }
+        model = body.model or s.axet_model
 
         llm = AnonymizationAgent._create_llm(
-            provider=body.provider,
+            provider="axet",
             model=model,
             temperature=0.0,
             **kwargs,
@@ -975,7 +928,7 @@ async def test_anon_llm_connection(body: TestConnectionRequest):
         response = await llm.ainvoke([HumanMessage(content="Responde solo: OK")])
         content = response.content if hasattr(response, "content") else str(response)
 
-        return {"success": True, "message": f"Conexion exitosa con {body.provider}/{model}", "response": content[:100]}
+        return {"success": True, "message": f"Conexion exitosa con axet/{model}", "response": content[:100]}
     except Exception as e:
-        logger.error("anon_llm_test_connection_failed", provider=body.provider, error=repr(e))
+        logger.error("anon_llm_test_connection_failed", error=repr(e))
         return {"success": False, "message": f"Error de conexion: {str(e)}"}

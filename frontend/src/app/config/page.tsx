@@ -136,7 +136,9 @@ const btnPrimary = "px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg
 
 export default function ConfigPage() {
   const { isAuthenticated, skipAuth, user: authUser } = useAuthStore();
-  const isAxetOnlyMode = isAuthenticated && !skipAuth;
+  // Only Axet is supported as LLM provider.
+  const isAxetOnlyMode = true;
+  void isAuthenticated; void skipAuth;
   const [activeTab, setActiveTab] = useState<Tab>("integrations");
 
   // Anonymization settings state

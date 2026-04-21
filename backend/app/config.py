@@ -15,29 +15,15 @@ class Settings(BaseSettings):
     # Database
     db_path: str = Field(default="data/ticketing.db", description="SQLite database path")
 
-    # LLM Provider for Resolution Agent: "openai", "azure", "axet", or "ollama"
-    llm_provider: str = Field(default="openai", description="LLM provider: 'openai', 'azure', 'axet', or 'ollama'")
+    # LLM Provider — only Axet is supported
+    llm_provider: str = Field(default="axet", description="LLM provider (only 'axet' supported)")
 
     # Anonymization LLM (smaller/faster model for PII filtering)
     anon_llm_provider: str = Field(default="", description="Anonymization LLM provider (empty = disabled, uses regex/Presidio only)")
-    anon_llm_model: str = Field(default="", description="Anonymization LLM model name (e.g. gpt-4o-mini, llama3.2:3b)")
+    anon_llm_model: str = Field(default="", description="Anonymization LLM model name")
     anon_llm_temperature: float = Field(default=0.0, description="Anonymization LLM temperature (should be 0 for deterministic output)")
 
-    # Ollama
-    ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama server URL")
-    ollama_model: str = Field(default="minimax-m1:latest", description="Ollama model name")
-
-    # Azure OpenAI
-    azure_openai_endpoint: str = Field(default="", description="Azure OpenAI endpoint URL")
-    azure_openai_key: str = Field(default="", description="Azure OpenAI API key")
-    azure_openai_deployment: str = Field(default="gpt-4", description="Azure OpenAI deployment name")
-    azure_openai_api_version: str = Field(default="2024-02-15-preview", description="Azure OpenAI API version")
-
-    # OpenAI (direct API, not Azure)
-    openai_api_key: str = Field(default="", description="OpenAI API key")
-    openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
-
-    # Axet (NTT Data OpenAI proxy)
+    # Axet (NTT Data OpenAI-compatible LLM proxy)
     axet_base_url: str = Field(default="https://axet.nttdata.com", description="Axet platform base URL")
     axet_bearer_token: str = Field(default="", description="Axet Bearer token for authentication")
     axet_asset_id: str = Field(default="", description="Axet asset ID")

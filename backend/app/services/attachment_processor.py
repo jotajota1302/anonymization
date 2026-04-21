@@ -1,7 +1,8 @@
 """Attachment text extraction service supporting PDF, images (LLM vision), and Office formats.
 
 Supports optional Presidio Image Redactor for PII detection/redaction directly on images.
-Uses LLM vision (OpenAI GPT-4o) for image text extraction instead of Tesseract OCR.
+Uses the agent's configured LLM (Axet / OpenAI / Azure — whatever is wired up) for
+image analysis via LangChain multimodal messages.
 """
 
 import io
@@ -172,12 +173,22 @@ Tu respuesta debe incluir:
 NUNCA reveles el valor real de ningun dato personal. Esta es una aplicacion GDPR-compliant."""
 
     def _extract_image(self, content: bytes) -> str:
-        """Analyze image using LLM vision API with PII redaction."""
+        """Analyze image using the agent's configured LLM with PII redaction.
+
+        Delegates to the same LLM that powers the chat agent (Axet / OpenAI /
+        Azure via LangChain). Bearer tokens, headers and model choice stay
+        centralized in `AnonymizationAgent._create_llm`.
+        """
         try:
-            from ..config import settings
+            from ..main import app_state
+            from langchain_core.messages import HumanMessage
+
+            agent = app_state.get("agent")
+            if agent is None or getattr(agent, "llm", None) is None:
+                return "[Analisis de imagenes no disponible: agente LLM no inicializado]"
+
             b64_image = base64.b64encode(content).decode("utf-8")
 
-            # Detect MIME type
             mime = "image/png"
             if content[:3] == b'\xff\xd8\xff':
                 mime = "image/jpeg"
@@ -186,47 +197,20 @@ NUNCA reveles el valor real de ningun dato personal. Esta es una aplicacion GDPR
             elif content[:2] == b'BM':
                 mime = "image/bmp"
 
-            prompt = self.IMAGE_ANALYSIS_PROMPT
-            messages = [{"role": "user", "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}}
-            ]}]
+            message = HumanMessage(content=[
+                {"type": "text", "text": self.IMAGE_ANALYSIS_PROMPT},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}},
+            ])
 
-            if settings.llm_provider == "openai":
-                import httpx
-                response = httpx.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-                    json={
-                        "model": settings.openai_model if "4o" in settings.openai_model else "gpt-4o-mini",
-                        "messages": messages,
-                        "max_tokens": 4096,
-                    },
-                    timeout=60,
-                )
-                response.raise_for_status()
-                text = response.json()["choices"][0]["message"]["content"]
-                logger.info("image_analyzed_via_llm", length=len(text))
-                return text.strip()
-
-            elif settings.llm_provider == "azure":
-                import httpx
-                response = httpx.post(
-                    f"{settings.azure_openai_endpoint}/openai/deployments/{settings.azure_openai_deployment}/chat/completions?api-version={settings.azure_openai_api_version}",
-                    headers={"api-key": settings.azure_openai_key},
-                    json={
-                        "messages": messages,
-                        "max_tokens": 4096,
-                    },
-                    timeout=60,
-                )
-                response.raise_for_status()
-                text = response.json()["choices"][0]["message"]["content"]
-                logger.info("image_analyzed_via_azure", length=len(text))
-                return text.strip()
-
-            else:
-                return "[Analisis de imagenes requiere LLM_PROVIDER openai o azure con soporte vision]"
+            response = agent.llm.invoke([message])
+            text = (response.content or "").strip()
+            logger.info(
+                "image_analyzed_via_agent_llm",
+                length=len(text),
+                provider=getattr(agent, "_llm_provider", "unknown"),
+                model=getattr(agent, "_llm_model", "unknown"),
+            )
+            return text
 
         except Exception as e:
             logger.error("llm_image_analysis_failed", error=str(e))

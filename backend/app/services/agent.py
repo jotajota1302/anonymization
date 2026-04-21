@@ -369,60 +369,41 @@ class AnonymizationAgent:
 
     @staticmethod
     def _create_llm(provider: str = None, model: str = None, temperature: float = None, **kwargs):
-        """Create LLM instance based on configured provider."""
-        provider = (provider or settings.llm_provider).lower()
+        """Create LLM instance — only Axet is supported."""
+        import httpx
+        from langchain_openai import ChatOpenAI
+        from ..routers.axet_auth import get_token_or_setting, _token_store
+
         temperature = temperature if temperature is not None else 0.3
 
-        if provider == "ollama":
-            from langchain_ollama import ChatOllama
-            return ChatOllama(
-                base_url=kwargs.get("ollama_base_url", settings.ollama_base_url),
-                model=model or settings.ollama_model,
-                temperature=temperature,
-            )
-        elif provider == "openai":
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
-                api_key=kwargs.get("openai_api_key", settings.openai_api_key),
-                model=model or settings.openai_model,
-                temperature=temperature,
-                streaming=True,
-            )
-        elif provider == "axet":
-            import httpx
-            from langchain_openai import ChatOpenAI
-            from ..routers.axet_auth import get_token_or_setting, _token_store
-            project_id = kwargs.get("axet_project_id", settings.axet_project_id)
-            if not project_id:
-                raise ValueError("Axet project_id no configurado. Selecciona un proyecto en la configuracion.")
-            bearer_token = kwargs.get("axet_bearer_token") or get_token_or_setting()
-            if not bearer_token:
-                raise ValueError("Axet bearer token no disponible. Inicia sesion con OKTA.")
-            asset_id = kwargs.get("axet_asset_id", settings.axet_asset_id)
-            axet_host = settings.axet_base_url.rstrip("/")
-            base_url = f"{axet_host}/api/llm-enabler/v2/openai/ntt/{project_id}/v1"
-            default_headers = {
-                "Authorization": f"Bearer {bearer_token}",
-                "axet-asset-id": asset_id,
-            }
-            # Add user ID if available from OAuth
-            user_info = _token_store.get("user_info")
-            if user_info and user_info.get("id"):
-                default_headers["axet-user-id"] = user_info["id"]
-            http_client = httpx.Client(verify=False)
-            async_http_client = httpx.AsyncClient(verify=False)
-            return ChatOpenAI(
-                api_key="dummy-key",
-                base_url=base_url,
-                default_headers=default_headers,
-                http_client=http_client,
-                http_async_client=async_http_client,
-                model=model or settings.axet_model,
-                temperature=temperature,
-                streaming=True,
-            )
-        else:
-            raise ValueError(f"Unknown LLM provider: {provider}. Use 'ollama', 'azure', 'openai', or 'axet'")
+        project_id = kwargs.get("axet_project_id", settings.axet_project_id)
+        if not project_id:
+            raise ValueError("Axet project_id no configurado. Selecciona un proyecto en la configuracion.")
+        bearer_token = kwargs.get("axet_bearer_token") or get_token_or_setting()
+        if not bearer_token:
+            raise ValueError("Axet bearer token no disponible. Inicia sesion con OKTA.")
+        asset_id = kwargs.get("axet_asset_id", settings.axet_asset_id)
+        axet_host = settings.axet_base_url.rstrip("/")
+        base_url = f"{axet_host}/api/llm-enabler/v2/openai/ntt/{project_id}/v1"
+        default_headers = {
+            "Authorization": f"Bearer {bearer_token}",
+            "axet-asset-id": asset_id,
+        }
+        user_info = _token_store.get("user_info")
+        if user_info and user_info.get("id"):
+            default_headers["axet-user-id"] = user_info["id"]
+        http_client = httpx.Client(verify=False)
+        async_http_client = httpx.AsyncClient(verify=False)
+        return ChatOpenAI(
+            api_key="dummy-key",
+            base_url=base_url,
+            default_headers=default_headers,
+            http_client=http_client,
+            http_async_client=async_http_client,
+            model=model or settings.axet_model,
+            temperature=temperature,
+            streaming=True,
+        )
 
     def update_llm(self, provider: str, model: str, temperature: float = 0.3, **kwargs):
         """Hot-reload: recreate the LLM instance with new config."""
@@ -446,31 +427,12 @@ class AnonymizationAgent:
         if not self.llm:
             return False, "No hay modelo LLM configurado."
 
-        provider = self._llm_provider.lower()
-
-        if provider == "openai":
-            api_key = getattr(self.llm, "openai_api_key", None) or ""
-            # Pydantic SecretStr
-            key_str = api_key.get_secret_value() if hasattr(api_key, "get_secret_value") else str(api_key)
-            if not key_str or key_str == "dummy-key":
-                return False, "OpenAI API key no configurada. Ve a Configuracion → Agente."
-
-        elif provider == "axet":
-            from ..routers.axet_auth import get_token_or_setting
-            token = get_token_or_setting()
-            if not token:
-                return False, "Axet: no hay token activo. Inicia sesion con OKTA en Configuracion → Agente."
-            project_id = settings.axet_project_id
-            if not project_id:
-                return False, "Axet: project_id no configurado. Selecciona un proyecto en Configuracion → Agente."
-
-        elif provider == "ollama":
-            # Ollama doesn't need credentials, but we could check connectivity
-            # For now, trust the config — failures will surface at invoke time
-            pass
-
-        else:
-            return False, f"Provider LLM desconocido: {provider}"
+        from ..routers.axet_auth import get_token_or_setting
+        token = get_token_or_setting()
+        if not token:
+            return False, "Axet: no hay token activo. Inicia sesion con OKTA en Configuracion → Agente."
+        if not settings.axet_project_id:
+            return False, "Axet: project_id no configurado. Selecciona un proyecto en Configuracion → Agente."
 
         return True, ""
 
