@@ -633,6 +633,10 @@ async def get_anonymization_settings():
     except Exception:
         pass
 
+    # Ensure new flags have a default even if missing in persisted config
+    if "auto_redact_attachments_on_ingest" not in config:
+        config["auto_redact_attachments_on_ingest"] = True
+
     return {
         **config,
         "active_detector": active_detector,
@@ -650,6 +654,7 @@ class AnonymizationUpdate(BaseModel):
     presidio_model: Optional[str] = None  # spacy model name
     pii_rules: Optional[Dict[str, bool]] = None
     substitution_technique: Optional[str] = None  # "redacted", "synthetic", "aes256"
+    auto_redact_attachments_on_ingest: Optional[bool] = None  # Presidio image redact on ingest
 
 
 @router.put("/anonymization")
@@ -690,6 +695,9 @@ async def update_anonymization_settings(body: AnonymizationUpdate):
 
     if body.substitution_technique is not None:
         config["substitution_technique"] = body.substitution_technique
+
+    if body.auto_redact_attachments_on_ingest is not None:
+        config["auto_redact_attachments_on_ingest"] = bool(body.auto_redact_attachments_on_ingest)
 
     # Persist
     await db.upsert_system_config(

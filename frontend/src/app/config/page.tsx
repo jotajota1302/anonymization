@@ -164,6 +164,7 @@ export default function ConfigPage() {
     PERSONA: 4, UBICACION: 5, ORGANIZACION: 4,
   });
   const [presidioModel, setPresidioModel] = useState("es_core_news_lg");
+  const [autoRedactAttachments, setAutoRedactAttachments] = useState(true);
 
   // Anonymization LLM state
   const [anonLlmEnabled, setAnonLlmEnabled] = useState(false);
@@ -291,6 +292,9 @@ export default function ConfigPage() {
         if (data.presidio_model) setPresidioModel(data.presidio_model);
         setSubstitutionTechnique(data.substitution_technique || "synthetic");
         if (data.pii_rules) setPiiStates(data.pii_rules);
+        if (typeof data.auto_redact_attachments_on_ingest === "boolean") {
+          setAutoRedactAttachments(data.auto_redact_attachments_on_ingest);
+        }
         setAnonLoaded(true);
       }
     } catch (err) {
@@ -572,6 +576,7 @@ export default function ConfigPage() {
           presidio_model: presidioModel,
           pii_rules: piiStates,
           substitution_technique: substitutionTechnique,
+          auto_redact_attachments_on_ingest: autoRedactAttachments,
         }),
       });
       if (res.ok) {
@@ -1822,6 +1827,36 @@ export default function ConfigPage() {
                       </div>
                     );
                   })}
+                </div>
+
+                {/* Auto-redact image attachments toggle */}
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        Redactar imagenes adjuntas automaticamente
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        Al ingestar un ticket, cada imagen adjunta (JPG/PNG/BMP/TIFF) se escanea con
+                        Presidio Image Redactor, se tachan las zonas con PII y la version redactada
+                        se adjunta al ticket anonimizado destino. Requiere Tesseract + presidio-image-redactor.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAutoRedactAttachments((v) => !v)}
+                      aria-pressed={autoRedactAttachments}
+                      className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${
+                        autoRedactAttachments ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                          autoRedactAttachments ? "left-[22px]" : "left-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Global save */}
