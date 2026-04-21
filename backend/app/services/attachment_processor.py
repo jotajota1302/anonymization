@@ -306,11 +306,25 @@ Tu respuesta debe incluir:
 NUNCA reveles el valor real de ningun dato personal. Esta es una aplicacion GDPR-compliant."""
 
     def _extract_image(self, content: bytes) -> str:
-        """Analyze image using the agent's configured LLM with PII redaction.
+        """Sync wrapper kept for backwards compatibility (e.g. _extract_pdf
+        fallback). Runs the async analyzer in a fresh loop when no loop is
+        running; otherwise delegates to the caller via extract_text_async.
+        """
+        import asyncio
+        try:
+            asyncio.get_running_loop()
+            # We are already inside an event loop — caller should use
+            # extract_text_async (awaitable) instead. Block-invoke would
+            # deadlock, so return a safe placeholder.
+            return "[Analisis de imagen requiere contexto async — usa extract_text_async]"
+        except RuntimeError:
+            return asyncio.run(self._extract_image_async(content))
 
-        Delegates to the same LLM that powers the chat agent (Axet / OpenAI /
-        Azure via LangChain). Bearer tokens, headers and model choice stay
-        centralized in `AnonymizationAgent._create_llm`.
+    async def _extract_image_async(self, content: bytes) -> str:
+        """Analyze image using the agent's configured LLM (Axet) asynchronously.
+
+        Uses `await llm.ainvoke(...)` so FastAPI's event loop is not blocked
+        during the (potentially multi-second) LLM Vision call.
         """
         try:
             from ..main import app_state
@@ -335,7 +349,7 @@ NUNCA reveles el valor real de ningun dato personal. Esta es una aplicacion GDPR
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}},
             ])
 
-            response = agent.llm.invoke([message])
+            response = await agent.llm.ainvoke([message])
             text = (response.content or "").strip()
             logger.info(
                 "image_analyzed_via_agent_llm",
@@ -348,6 +362,20 @@ NUNCA reveles el valor real de ningun dato personal. Esta es una aplicacion GDPR
         except Exception as e:
             logger.error("llm_image_analysis_failed", error=str(e))
             return f"[Error analisis imagen: {e}]"
+
+    async def extract_text_async(self, content: bytes, filename: str) -> Tuple[str, str]:
+        """Async version of extract_text — use from async contexts to avoid
+        blocking the event loop while LLM Vision processes an image.
+        """
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext in ("jpg", "jpeg", "png", "bmp", "tiff", "tif"):
+            text = await self._extract_image_async(content)
+            return text, "ocr"
+        # Other formats are CPU-bound but short; run in a thread to keep the
+        # event loop responsive on large PDFs / xlsx files.
+        import asyncio
+        text, fmt = await asyncio.to_thread(self.extract_text, content, filename)
+        return text, fmt
 
     def _extract_pdf(self, content: bytes) -> str:
         try:

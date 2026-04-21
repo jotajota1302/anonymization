@@ -10,6 +10,7 @@ from ..models.schemas import (
     TicketStatusUpdate, ChatMessageSchema, SyncToClientRequest,
 )
 from ..services.anonymizer import Anonymizer
+from ..connectors.base import TicketConnector
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -378,31 +379,52 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
                 anon_cfg = {}
         auto_redact = anon_cfg.get("auto_redact_attachments_on_ingest", True)
         if auto_redact:
+            import asyncio as _asyncio
             from ..services.attachment_processor import AttachmentProcessor
             from ..services import redacted_cache
             processor = AttachmentProcessor()
-            for attach in image_attachments:
-                filename = attach.get("filename", "unknown.png")
-                url = attach.get("content", "")
-                if not url:
-                    continue
-                try:
-                    raw = await source_connector.download_attachment(url)
-                    if not raw:
+
+            # Fail early if the destination connector can't accept attachments
+            # so we log a clear reason instead of a silent NotImplementedError.
+            if not hasattr(destination, "upload_attachment") or type(destination).upload_attachment is TicketConnector.upload_attachment:
+                logger.warning(
+                    "redact_skipped_upload_unsupported",
+                    connector=type(destination).__name__,
+                    reason="destination does not implement upload_attachment — configure KosinConnector-based destination",
+                )
+            else:
+                for attach in image_attachments:
+                    filename = attach.get("filename", "unknown.png")
+                    url = attach.get("content", "")
+                    if not url:
                         continue
-                    redacted = processor.redact_image(raw)
-                    if redacted is None:
-                        logger.warning("redact_skipped_presidio_unavailable", filename=filename)
-                        break  # Presidio not installed — skip all
-                    redacted_cache.put(kosin_key, filename, redacted)
-                    out_name = filename.rsplit(".", 1)[0] + "_redacted.png"
-                    ok, err = await destination.upload_attachment(kosin_id, out_name, redacted, "image/png")
-                    if ok:
-                        redacted_count += 1
-                    else:
-                        logger.warning("redacted_upload_failed", filename=filename, error=err)
-                except Exception as e:
-                    logger.warning("redact_attachment_failed", filename=filename, error=str(e))
+                    try:
+                        raw = await source_connector.download_attachment(url)
+                        if not raw:
+                            continue
+                        # redact_image runs OCR + Presidio locally and can
+                        # take several seconds on big images; run off the
+                        # event loop so concurrent WS/chat are not blocked.
+                        redacted = await _asyncio.to_thread(processor.redact_image, raw)
+                        if redacted is None:
+                            logger.warning(
+                                "redact_skipped_presidio_unavailable",
+                                filename=filename,
+                                hint="Install presidio-image-redactor + tesseract-ocr-spa",
+                            )
+                            # continue instead of break: try the remaining
+                            # attachments (maybe Presidio recovers, maybe
+                            # the next attachment is not an image).
+                            continue
+                        redacted_cache.put(kosin_key, filename, redacted)
+                        out_name = filename.rsplit(".", 1)[0] + "_redacted.png"
+                        ok, err = await destination.upload_attachment(kosin_id, out_name, redacted, "image/png")
+                        if ok:
+                            redacted_count += 1
+                        else:
+                            logger.warning("redacted_upload_failed", filename=filename, error=err)
+                    except Exception as e:
+                        logger.warning("redact_attachment_failed", filename=filename, error=str(e))
 
     # --- Step 3: Completed ---
     pii_total = len(sub_map)
@@ -876,8 +898,9 @@ async def get_redacted_attachment(ticket_id: int, attachment_index: int = 0):
         if not content_bytes:
             raise HTTPException(status_code=502, detail="No se pudo descargar el adjunto")
 
+        import asyncio as _asyncio
         processor = AttachmentProcessor()
-        redacted_bytes = processor.redact_image(content_bytes)
+        redacted_bytes = await _asyncio.to_thread(processor.redact_image, content_bytes)
 
         if redacted_bytes is None:
             raise HTTPException(

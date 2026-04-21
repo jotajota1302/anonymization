@@ -53,9 +53,10 @@ async def read_attachment(ticket_id: str, attachment_index: int = 0) -> str:
         if not content_bytes:
             return f"No se pudo descargar el adjunto '{filename}'."
 
-        # Extract text
+        # Extract text. Use the async variant so the LLM Vision call for
+        # images doesn't block the FastAPI event loop during chat streaming.
         processor = AttachmentProcessor()
-        text, format_used = processor.extract_text(content_bytes, filename)
+        text, format_used = await processor.extract_text_async(content_bytes, filename)
 
         if not text or text.startswith("[Error"):
             return f"Adjunto '{filename}' ({format_used}): {text}"
@@ -63,11 +64,14 @@ async def read_attachment(ticket_id: str, attachment_index: int = 0) -> str:
         # Anonymize the extracted text
         anonymized_text, _ = anonymizer.anonymize(text)
 
-        # For images, also try Presidio image analysis for extra PII context
+        # For images, also try Presidio image analysis for extra PII context.
+        # analyze_image runs OCR + Presidio locally; wrap in to_thread so it
+        # doesn't block the event loop during chat streaming.
+        import asyncio as _asyncio
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         image_pii_note = ""
         if ext in ("jpg", "jpeg", "png", "bmp", "tiff", "tif"):
-            image_entities = processor.analyze_image(content_bytes)
+            image_entities = await _asyncio.to_thread(processor.analyze_image, content_bytes)
             if image_entities:
                 unique_types = {e["entity_type"] for e in image_entities}
                 image_pii_note = (
