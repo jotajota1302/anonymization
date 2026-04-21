@@ -160,12 +160,13 @@ async def reload_connectors(db=None):
         except Exception as e:
             logger.error("connector_load_failed", system=name, error=str(e))
 
-    # Pick a single destination. Prefer system_name='kosin' if present
-    # (legacy alias), otherwise the alphabetically-first name so behaviour
-    # is stable across restarts.
+    # Pick a single destination. Prefer canonical 'gdnespain'; fall back
+    # alphabetically so behaviour is stable across restarts. The startup
+    # migration in _seed_default_configs disables a legacy 'kosin' row if
+    # both exist, but we still belt-and-braces here.
     destination_connector = None
     if destinations:
-        destinations.sort(key=lambda x: (x[0] != "kosin", x[0]))
+        destinations.sort(key=lambda x: (x[0] != "gdnespain", x[0]))
         destination_connector = destinations[0][1]
         if len(destinations) > 1:
             logger.warning(
@@ -224,6 +225,28 @@ async def _seed_default_configs(db):
             "polling_interval_sec": 60,
         },
     ]
+    # Migration: older installs had a destination row with system_name='kosin'
+    # that is now superseded by 'gdnespain'. If both exist and both are
+    # active destinations, disable the legacy 'kosin' row so reload_connectors
+    # doesn't end up with two destinations fighting.
+    try:
+        gdn = await db.get_system_config("gdnespain")
+        legacy = await db.get_system_config("kosin")
+        if (
+            gdn and legacy
+            and gdn.get("is_active") and legacy.get("is_active")
+            and gdn.get("system_type") == "destination"
+            and legacy.get("system_type") == "destination"
+        ):
+            await db.upsert_system_config("kosin", is_active=0)
+            logger.warning(
+                "legacy_destination_deactivated",
+                system="kosin",
+                reason="superseded by gdnespain",
+            )
+    except Exception as e:
+        logger.warning("legacy_destination_migration_failed", error=str(e))
+
     active_list = [s.strip().lower() for s in settings.active_sources.split(",") if s.strip()]
     for cfg in defaults:
         name = cfg.pop("system_name")
