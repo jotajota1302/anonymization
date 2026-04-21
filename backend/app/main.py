@@ -133,8 +133,10 @@ async def reload_connectors(db=None):
     router = ConnectorRouter()
     configs = await db.get_all_system_configs()
 
-    # Build connectors from active integrations
-    destination_connector = None
+    # Build connectors from active integrations.
+    # Collect ALL active destinations so we can warn on duplicates and pick
+    # one deterministically (instead of silently keeping the last one seen).
+    destinations: list[tuple[str, object]] = []
     for cfg in configs:
         name = cfg.get("system_name", "")
         # Skip internal config entries
@@ -149,7 +151,7 @@ async def reload_connectors(db=None):
             system_type = cfg.get("system_type", "source")
 
             if system_type == "destination":
-                destination_connector = connector
+                destinations.append((name, connector))
             if project_key and system_type != "destination":
                 router.register(name, connector, [f"{project_key}-"])
 
@@ -157,6 +159,23 @@ async def reload_connectors(db=None):
                         project=project_key, system_type=system_type)
         except Exception as e:
             logger.error("connector_load_failed", system=name, error=str(e))
+
+    # Pick a single destination. Prefer system_name='kosin' if present
+    # (legacy alias), otherwise the alphabetically-first name so behaviour
+    # is stable across restarts.
+    destination_connector = None
+    if destinations:
+        destinations.sort(key=lambda x: (x[0] != "kosin", x[0]))
+        destination_connector = destinations[0][1]
+        if len(destinations) > 1:
+            logger.warning(
+                "multiple_destinations_configured",
+                count=len(destinations),
+                names=[d[0] for d in destinations],
+                active=destinations[0][0],
+                hint="Delete duplicate destination rows in system_config to keep one",
+            )
+        logger.info("active_destination_connector", system=destinations[0][0])
 
     app_state["connector_router"] = router
     app_state["destination_connector"] = destination_connector

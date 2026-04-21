@@ -19,12 +19,31 @@ async def websocket_chat(websocket: WebSocket, client_id: str):
 
     Client sends: {"ticket_id": int, "message": str}
     Server sends: {"type": "token"|"complete"|"error"|"info", "data": str, "ticket_id": int}
+
+    Also emits {"type":"heartbeat"} every 20s server-side so Istio/Envoy
+    idle timeouts (default 30s on many ingress controllers) don't tear the
+    socket down during long LLM streams or when the operator is idle.
     """
+    import asyncio as _asyncio
+
     state = _get_state()
     ws_manager = state["ws_manager"]
     agent = state["agent"]
 
     await ws_manager.connect(websocket, client_id)
+
+    async def _heartbeat():
+        try:
+            while True:
+                await _asyncio.sleep(20)
+                try:
+                    await websocket.send_json({"type": "heartbeat"})
+                except Exception:
+                    break
+        except _asyncio.CancelledError:
+            pass
+
+    hb_task = _asyncio.create_task(_heartbeat())
 
     try:
         while True:
@@ -90,3 +109,5 @@ async def websocket_chat(websocket: WebSocket, client_id: str):
     except Exception as e:
         logger.error("ws_unexpected_error", client_id=client_id, error=str(e))
         ws_manager.disconnect(client_id)
+    finally:
+        hb_task.cancel()
