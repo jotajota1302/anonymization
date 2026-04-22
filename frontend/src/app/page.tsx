@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import { useAppStore } from "@/stores/appStore";
 import { TicketList } from "@/components/TicketList";
 import { ChatPanel } from "@/components/ChatPanel";
 import { CommandPalette } from "@/components/CommandPalette";
 import { Header } from "@/components/Header";
+import { CloseTicketModal } from "@/components/CloseTicketModal";
 import { API_URL } from "@/lib/config";
 import { TicketSummary, BoardTicket } from "@/types";
 
@@ -305,6 +306,62 @@ export default function Home() {
     });
   }, [selectedTicketId, doSyncAndCloseSource]);
 
+  // --- Unified close flow ---
+  const [closeModalOpen, setCloseModalOpen] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+  const { chatMessages: allChatMessages } = useAppStore();
+
+  const defaultSummaryForClose = useMemo(() => {
+    if (!selectedTicketId) return "";
+    const msgs = allChatMessages[selectedTicketId] || [];
+    const agentMsgs = msgs.filter((m) => m.role === "agent");
+    const last = agentMsgs[agentMsgs.length - 1];
+    if (!last) return "";
+    return last.content.replace(/\[CHIPS[:\s].*?\]/gs, "").trim();
+  }, [selectedTicketId, allChatMessages]);
+
+  const handleOpenCloseModal = useCallback(() => {
+    if (!selectedTicketId) return;
+    setCloseModalOpen(true);
+  }, [selectedTicketId]);
+
+  const handleConfirmClose = useCallback(
+    async ({ time_spent, summary }: { time_spent: string; summary: string }) => {
+      if (!selectedTicketId) return;
+      setIsClosing(true);
+      try {
+        const res = await fetch(
+          `${API_URL}/api/tickets/${selectedTicketId}/close?client_id=${encodeURIComponent(clientId)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              time_spent: time_spent || null,
+              summary: summary || null,
+            }),
+          }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const suffix = data.time_source === "llm"
+            ? ` (estimado por IA${data.time_rationale ? `: ${data.time_rationale}` : ""})`
+            : "";
+          showToast(`${data.message}${suffix}`, "success");
+          setCloseModalOpen(false);
+          await fetchTickets();
+        } else {
+          const err = await safeJson(res);
+          showToast(`Error al cerrar: ${err.detail || "Error desconocido"}`);
+        }
+      } catch (err) {
+        showToast("Error de red al cerrar el ticket");
+      } finally {
+        setIsClosing(false);
+      }
+    },
+    [selectedTicketId, clientId, fetchTickets, showToast]
+  );
+
   const selectedBoardTicket = selectedBoardKey
     ? boardTickets.find((bt) => bt.key === selectedBoardKey) || null
     : null;
@@ -364,6 +421,7 @@ export default function Home() {
             ticketId={selectedTicketId} boardTicket={selectedBoardTicket}
             onSendMessage={handleSendMessage} onFinalizeDestination={handleFinalizeDestination}
             onSyncComment={handleSyncToClient} onSyncAndCloseSource={handleSyncAndCloseSource}
+            onCloseTicket={handleOpenCloseModal}
             onConfirmIngest={handleConfirmIngest}
           />
         </section>
@@ -371,6 +429,15 @@ export default function Home() {
 
       {/* Command Palette (Ctrl+K) */}
       <CommandPalette onSelectTicket={handleSelectTicket} onSelectBoardTicket={handleSelectBoardTicket} />
+
+      {/* Unified close modal */}
+      <CloseTicketModal
+        open={closeModalOpen}
+        defaultSummary={defaultSummaryForClose}
+        isSubmitting={isClosing}
+        onCancel={() => { if (!isClosing) setCloseModalOpen(false); }}
+        onConfirm={handleConfirmClose}
+      />
 
       {/* Toast notification */}
       {toast && (

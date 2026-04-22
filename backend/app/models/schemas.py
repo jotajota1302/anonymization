@@ -105,6 +105,12 @@ class SyncToClientRequest(BaseModel):
     comment: str = Field(..., min_length=1)
 
 
+class CloseTicketRequest(BaseModel):
+    """Request body for unified ticket close (destination + source + worklog)."""
+    time_spent: Optional[str] = Field(None, description="Jira time format e.g. '2h 30m'. If empty, estimated by LLM.")
+    summary: Optional[str] = Field(None, description="Resolution summary. If empty, uses last agent message.")
+
+
 class BoardTicket(BaseModel):
     """A ticket from the KOSIN board - only safe metadata, no PII."""
     key: str

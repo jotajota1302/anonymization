@@ -5,7 +5,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useAppStore } from "@/stores/appStore";
 
 interface HeaderProps {
-  activePage: "incidencias" | "config";
+  activePage: "incidencias" | "dashboard" | "config";
   isConnected?: boolean;
   subheader?: React.ReactNode;
 }
@@ -35,6 +35,7 @@ export function Header({ activePage, isConnected: isConnectedProp, subheader }: 
 
   const navItems = [
     { id: "incidencias", label: "Incidencias", href: "/" },
+    { id: "dashboard", label: "Dashboard", href: "/dashboard" },
     { id: "config", label: "Configuracion", href: "/config" },
   ] as const;
 

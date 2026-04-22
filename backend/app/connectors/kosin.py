@@ -292,6 +292,11 @@ class KosinConnector(TicketConnector):
             return False
 
     async def add_comment(self, ticket_id: str, comment: str) -> bool:
+        ok, _ = await self.add_comment_with_id(ticket_id, comment)
+        return ok
+
+    async def add_comment_with_id(self, ticket_id: str, comment: str) -> tuple[bool, Optional[str]]:
+        """Publish a comment and return (success, comment_id). Used for rollback."""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
@@ -300,14 +305,30 @@ class KosinConnector(TicketConnector):
                     json={"body": comment},
                 )
                 resp.raise_for_status()
-                return True
+                data = resp.json() if resp.content else {}
+                return True, data.get("id")
         except httpx.HTTPStatusError as e:
             body = e.response.text[:500] if e.response else "no response"
             logger.error("kosin_comment_failed", error=f"HTTP {e.response.status_code}: {body}")
-            return False
+            return False, None
         except httpx.HTTPError as e:
             error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
             logger.error("kosin_comment_failed", error=error_msg, error_type=type(e).__name__)
+            return False, None
+
+    async def delete_comment(self, ticket_id: str, comment_id: str) -> bool:
+        """Delete a previously added comment. Used for rollback."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.delete(
+                    f"{self._api_base}/issue/{ticket_id}/comment/{comment_id}",
+                    headers=self._headers,
+                )
+                resp.raise_for_status()
+                logger.info("kosin_comment_deleted", ticket=ticket_id, comment_id=comment_id)
+                return True
+        except httpx.HTTPError as e:
+            logger.warning("kosin_comment_delete_failed", ticket=ticket_id, comment_id=comment_id, error=str(e))
             return False
 
     async def get_board_issues(self, filters: Optional[BoardFilters] = None) -> List[Dict]:
@@ -403,8 +424,13 @@ class KosinConnector(TicketConnector):
         self, ticket_id: str, time_spent: str, comment: str = "", started: str = ""
     ) -> bool:
         """Add a worklog entry to a KOSIN ticket."""
-        # Jira REST API v2 requires 'started' in worklog payload.
-        # Default to current time if not provided.
+        ok, _ = await self.add_worklog_with_id(ticket_id, time_spent, comment, started)
+        return ok
+
+    async def add_worklog_with_id(
+        self, ticket_id: str, time_spent: str, comment: str = "", started: str = ""
+    ) -> tuple[bool, Optional[str]]:
+        """Add worklog and return (success, worklog_id). Used for rollback."""
         if not started:
             from datetime import datetime, timezone
             started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+0000")
@@ -419,8 +445,10 @@ class KosinConnector(TicketConnector):
                     json=payload,
                 )
                 resp.raise_for_status()
-                logger.info("kosin_worklog_added", ticket=ticket_id, time_spent=time_spent)
-                return True
+                data = resp.json() if resp.content else {}
+                worklog_id = data.get("id")
+                logger.info("kosin_worklog_added", ticket=ticket_id, time_spent=time_spent, worklog_id=worklog_id)
+                return True, worklog_id
         except httpx.HTTPStatusError as e:
             body = e.response.text[:500] if e.response else "no response"
             logger.error("kosin_worklog_add_failed", ticket=ticket_id, error=f"HTTP {e.response.status_code}: {body}")

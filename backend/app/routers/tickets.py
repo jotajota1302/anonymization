@@ -8,8 +8,10 @@ import structlog
 from ..models.schemas import (
     TicketSummary, TicketDetail, BoardTicket, IngestConfirmResponse,
     TicketStatusUpdate, ChatMessageSchema, SyncToClientRequest,
+    CloseTicketRequest,
 )
 from ..services.anonymizer import Anonymizer
+from ..services.time_estimator import normalize_jira_time, estimate_time_with_llm
 from ..connectors.base import TicketConnector
 
 logger = structlog.get_logger()
@@ -924,3 +926,302 @@ async def get_redacted_attachment(ticket_id: int, attachment_index: int = 0):
             "X-Cache": "HIT" if cache_hit else "MISS",
         },
     )
+
+
+# -------------------------------------------------------------
+# Unified close: destination + source comment + worklog + source close
+# All-or-nothing with best-effort rollback on failure.
+# -------------------------------------------------------------
+
+async def _source_has_close_transition(source_connector, source_id: str) -> tuple[bool, list[str]]:
+    """Pre-check: confirm the source ticket has a transition whose name looks like 'done/close/resolve'."""
+    DONE_KW = ("done", "closed", "close", "resolved", "resuelto", "cerrado", "cerrar", "finalizar", "completado", "completar")
+    try:
+        transitions = await source_connector.get_available_transitions(source_id)
+    except Exception as e:
+        logger.warning("close_precheck_transitions_failed", error=str(e))
+        return False, []
+    names = [t.get("name", "") for t in transitions]
+    if any(any(kw in (n.lower()) for kw in DONE_KW) for n in names):
+        return True, names
+    return False, names
+
+
+@router.post("/{ticket_id}/close")
+async def close_ticket(
+    ticket_id: int,
+    body: CloseTicketRequest,
+    client_id: Optional[str] = Query(None),
+):
+    """Unified close: finalize destination + publish resolution + log work + close source.
+
+    Atomic with best-effort rollback:
+      1. Pre-check: source must have a visible close transition.
+      2. Build summary (operator-provided or last agent message).
+      3. Build time_spent (operator-provided or LLM-estimated).
+      4. Close destination (skip if already resolved).
+      5. Reconstruct sub_map from source; de-anonymize summary.
+      6. Publish [RESOLUCION] comment in source.
+      7. Add worklog in source.
+      8. Close source via walk_transitions_to / update_status.
+      9. Mark DB as closed, invalidate cache, audit.
+
+    On failure at step 4+, attempts rollback in reverse: delete worklog, delete
+    comment, reopen destination. Returns 5xx with details; DB stays at resolved/prior.
+    """
+    state = _get_state()
+    db = state["db"]
+    anonymizer = state["anonymizer"]
+    destination = state.get("destination_connector")
+    ws_manager = state.get("ws_manager")
+    agent = state.get("agent")
+
+    if not destination:
+        raise HTTPException(status_code=503, detail="No hay conector destino configurado")
+
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if ticket["status"] == "closed":
+        raise HTTPException(status_code=409, detail="El ticket ya esta cerrado")
+
+    source_id = ticket["source_ticket_id"]
+    dest_key = ticket["kosin_ticket_id"]
+
+    # Resolve source connector
+    connector_router = state.get("connector_router")
+    if connector_router:
+        try:
+            _, source_connector = connector_router.get_connector(source_id)
+        except ValueError:
+            source_connector = state["jira_connector"]
+    else:
+        source_connector = state["jira_connector"]
+
+    async def _progress(step: str, detail: str = ""):
+        if not (client_id and ws_manager and ws_manager.is_connected(client_id)):
+            return
+        await ws_manager.send_message(client_id, {
+            "type": "sync_progress",
+            "data": {"step": step, "detail": detail, "ticket_id": ticket_id},
+        })
+
+    # --- Step 1: Pre-check source can be closed ---
+    await _progress("precheck", f"Verificando transiciones de {source_id}")
+    can_close, available = await _source_has_close_transition(source_connector, source_id)
+    if not can_close:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"El ticket origen {source_id} no tiene una transicion de cierre visible. "
+                f"Transiciones disponibles: {available or 'ninguna'}. "
+                f"Revisa el workflow en el proyecto origen o los permisos del token."
+            ),
+        )
+
+    # --- Step 2: Build resolution summary ---
+    chat_history = await db.get_chat_history(ticket_id)
+    import re
+    summary_anon = (body.summary or "").strip()
+    if not summary_anon:
+        agent_msgs = [m for m in chat_history if m["role"] == "agent"]
+        if not agent_msgs:
+            raise HTTPException(
+                status_code=400,
+                detail="No hay resumen ni mensajes del agente para usar como resolucion",
+            )
+        summary_anon = re.sub(r"\[CHIPS[:\s].*?\]", "", agent_msgs[-1]["message"], flags=re.DOTALL).strip()
+    if not summary_anon:
+        raise HTTPException(status_code=400, detail="El resumen de resolucion quedo vacio")
+
+    # --- Step 3: Resolve time_spent (user → normalize; else LLM estimate) ---
+    time_spent: Optional[str] = None
+    time_source = "operator"
+    time_rationale = ""
+    if body.time_spent:
+        time_spent = normalize_jira_time(body.time_spent)
+        if not time_spent:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Formato de horas invalido: '{body.time_spent}'. Usa formato Jira (p.ej. '2h 30m', '45m', '1h').",
+            )
+    else:
+        if not agent or not getattr(agent, "llm", None):
+            raise HTTPException(
+                status_code=503,
+                detail="No hay LLM configurado para estimar horas. Indicalas manualmente.",
+            )
+        await _progress("estimating_time", "Estimando horas con IA")
+        time_spent, time_rationale = await estimate_time_with_llm(chat_history, agent.llm)
+        time_source = "llm"
+
+    # --- Step 4: De-anonymize summary using source as ground truth ---
+    await _progress("deanonymizing", "De-anonimizando resumen")
+    try:
+        source_ticket = await source_connector.get_ticket(source_id)
+        comments = await source_connector.get_comments(source_id)
+        full_text = Anonymizer.assemble_ingest_text(
+            source_ticket.get("summary", ""),
+            source_ticket.get("description", "") or "",
+            comments,
+        )
+        sub_map = anonymizer.reconstruct_map(full_text)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"No se pudo reconstruir el mapa desde el origen: {str(e)}",
+        )
+
+    real_summary = Anonymizer.de_anonymize(summary_anon, sub_map)
+    comment_text = f"[RESOLUCION] {real_summary}"
+
+    # --- State tracking for rollback ---
+    destination_was_closed_here = False
+    source_comment_id: Optional[str] = None
+    source_worklog_id: Optional[str] = None
+
+    async def _rollback(reason: str):
+        logger.warning("close_rollback_start", ticket_id=ticket_id, reason=reason)
+        if source_worklog_id:
+            try:
+                await source_connector.delete_worklog(source_id, source_worklog_id)
+            except Exception as e:
+                logger.error("rollback_worklog_failed", error=str(e))
+        if source_comment_id and hasattr(source_connector, "delete_comment"):
+            try:
+                await source_connector.delete_comment(source_id, source_comment_id)
+            except Exception as e:
+                logger.error("rollback_comment_failed", error=str(e))
+        if destination_was_closed_here:
+            try:
+                await destination.walk_transitions_to(dest_key, "open")
+            except Exception as e:
+                logger.warning("rollback_reopen_destination_failed", error=str(e))
+        await db.add_audit_log(
+            operator_id="operator",
+            action="close_rollback",
+            ticket_mapping_id=ticket_id,
+            details=f"reason={reason}",
+        )
+
+    try:
+        # --- Step 5: Close destination (if not already) ---
+        if ticket["status"] != "resolved":
+            await _progress("closing_destination", f"Cerrando destino {dest_key}")
+            ok = False
+            try:
+                ok, _ = await destination.walk_transitions_to(dest_key, "done")
+            except Exception as e:
+                logger.warning("close_walk_destination_failed", error=str(e))
+            if not ok:
+                try:
+                    ok = await destination.update_status(dest_key, "done")
+                except Exception as e:
+                    logger.warning("close_update_destination_failed", error=str(e))
+            if not ok:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"No se pudo cerrar el ticket destino {dest_key}. Revisa el workflow KOSIN.",
+                )
+            destination_was_closed_here = True
+
+        # --- Step 6: Publish comment in source ---
+        await _progress("publishing_comment", f"Publicando resolucion en {source_id}")
+        if hasattr(source_connector, "add_comment_with_id"):
+            c_ok, c_id = await source_connector.add_comment_with_id(source_id, comment_text)
+        else:
+            c_ok = await source_connector.add_comment(source_id, comment_text)
+            c_id = None
+        if not c_ok:
+            raise HTTPException(status_code=502, detail="Error publicando comentario de resolucion en origen")
+        source_comment_id = c_id
+
+        # --- Step 7: Add worklog in source ---
+        await _progress("logging_work", f"Registrando {time_spent} en {source_id}")
+        worklog_comment = f"Resolucion ticket {dest_key}: {real_summary[:500]}"
+        if time_source == "llm":
+            worklog_comment = f"[Horas estimadas por IA] {worklog_comment}"
+        try:
+            if hasattr(source_connector, "add_worklog_with_id"):
+                w_ok, w_id = await source_connector.add_worklog_with_id(
+                    source_id, time_spent, worklog_comment
+                )
+            else:
+                w_ok = await source_connector.add_worklog(source_id, time_spent, worklog_comment)
+                w_id = None
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Error registrando worklog en {source_id}: {e}")
+        if not w_ok:
+            raise HTTPException(status_code=502, detail=f"No se pudo registrar worklog en {source_id}")
+        source_worklog_id = w_id
+
+        # --- Step 8: Close source ---
+        await _progress("closing_source", f"Cerrando origen {source_id}")
+        source_closed = False
+        source_steps: list[str] = []
+        try:
+            source_closed, source_steps = await source_connector.walk_transitions_to(source_id, "done")
+        except Exception as e:
+            logger.warning("close_walk_source_failed", error=str(e))
+
+        if not source_closed:
+            try:
+                source_closed = await source_connector.update_status(source_id, "done")
+                if source_closed:
+                    source_steps.append("fallback:update_status")
+            except Exception as e:
+                logger.warning("close_update_source_failed", error=str(e))
+
+        if not source_closed:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"No se pudo cerrar el ticket origen {source_id} despues del worklog. "
+                    f"Se ha hecho rollback de comentario + worklog + destino. "
+                    f"Pasos intentados: {source_steps or 'ninguno'}."
+                ),
+            )
+
+    except HTTPException:
+        await _rollback("close_step_failed")
+        raise
+    except Exception as e:
+        await _rollback(f"unexpected:{e}")
+        raise HTTPException(status_code=500, detail=f"Error inesperado al cerrar: {e}")
+
+    # --- Step 9: Commit in DB ---
+    await db.update_ticket_status(ticket_id, "closed")
+    if agent:
+        agent.invalidate_map_cache(ticket_id)
+
+    await db.add_audit_log(
+        operator_id="operator",
+        action="close_ticket_unified",
+        ticket_mapping_id=ticket_id,
+        details=(
+            f"source={source_id}, dest={dest_key}, time_spent={time_spent} ({time_source}), "
+            f"source_steps={source_steps}"
+        ),
+    )
+
+    await _progress("completed", f"Ticket cerrado — {time_spent} registradas en origen")
+    logger.info(
+        "close_ticket_unified_ok",
+        ticket_id=ticket_id,
+        source=source_id,
+        dest=dest_key,
+        time_spent=time_spent,
+        time_source=time_source,
+    )
+
+    return {
+        "success": True,
+        "message": f"Ticket cerrado correctamente — {time_spent} registradas en {source_id}",
+        "source_key": source_id,
+        "dest_key": dest_key,
+        "time_spent": time_spent,
+        "time_source": time_source,
+        "time_rationale": time_rationale,
+        "source_transition_steps": source_steps,
+    }

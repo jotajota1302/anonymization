@@ -103,10 +103,12 @@ interface Props {
   onFinalizeDestination: () => void;
   onSyncComment: (comment: string) => void | Promise<void>;
   onSyncAndCloseSource: () => void;
+  onCloseTicket: () => void;
   onConfirmIngest: (key: string) => void;
 }
 
-export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDestination, onSyncComment, onSyncAndCloseSource, onConfirmIngest }: Props) {
+export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDestination, onSyncComment, onSyncAndCloseSource, onCloseTicket, onConfirmIngest }: Props) {
+  void onFinalizeDestination; void onSyncAndCloseSource;
   const [input, setInput] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -344,7 +346,7 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
             </button>
           </div>
           <div className="flex gap-3 items-center" role="group" aria-label="Acciones del ticket">
-            {ticket && ticket.status !== "resolved" && ticket.status !== "closed" && (
+            {ticket && ticket.status !== "closed" && (
               <>
                 <button
                   onClick={async () => {
@@ -361,31 +363,18 @@ export function ChatPanel({ ticketId, boardTicket, onSendMessage, onFinalizeDest
                     }
                   }}
                   disabled={isSyncing}
-                  title="Enviar ultimo comentario del agente al ticket origen"
+                  title="Enviar ultimo comentario del agente al ticket origen (sin cerrar)"
                   className="flex items-center gap-2 px-4 py-2 bg-teal-500 text-white rounded-lg text-sm font-bold hover:bg-teal-600 transition-colors shadow-lg shadow-teal-500/20 disabled:opacity-50">
                   <IconSync />
                   {isSyncing ? "Sincronizando..." : "Sincronizar comentario"}
                 </button>
-                <button onClick={onFinalizeDestination}
-                  disabled={isFinalizing}
-                  title="Cierra el ticket anonimizado en KOSIN"
+                <button
+                  onClick={onCloseTicket}
+                  disabled={isFinalizing || isSyncingSource}
+                  title="Cierra destino y origen, publica resolucion y registra horas trabajadas"
                   className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-blue-600 transition-all shadow-lg shadow-primary/20 disabled:opacity-50">
-                  {isFinalizing ? <IconSpinner /> : <IconCheck />}
-                  {isFinalizing ? "Finalizando..." : "Finalizar destino"}
-                </button>
-              </>
-            )}
-            {ticket && ticket.status === "resolved" && (
-              <>
-                <span className="flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs font-bold rounded-lg">
-                  <IconCheck size={14} />
-                  Destino finalizado
-                </span>
-                <button onClick={onSyncAndCloseSource}
-                  disabled={isSyncingSource}
-                  className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-bold hover:bg-orange-600 transition-colors shadow-lg shadow-orange-500/20 disabled:opacity-50">
-                  {isSyncingSource ? <IconSpinner /> : <IconSyncLock />}
-                  {isSyncingSource ? "Sincronizando..." : "Sincronizar y cerrar origen"}
+                  {(isFinalizing || isSyncingSource) ? <IconSpinner /> : <IconSyncLock />}
+                  {(isFinalizing || isSyncingSource) ? "Cerrando..." : "Cerrar ticket"}
                 </button>
               </>
             )}
