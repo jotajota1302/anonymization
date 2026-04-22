@@ -1,4 +1,25 @@
 apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: ticketing-anonymization-backend-destination
+  namespace: alicante
+spec:
+  host: ticketing-anonymization-backend-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        # TCP keepalive para que el proxy no mate conexiones inactivas.
+        tcpKeepalive:
+          time: 30s
+          interval: 10s
+      http:
+        # Sube el idle timeout del Envoy sidecar a 1h para WebSockets largos.
+        # Por defecto muchos clusters lo dejan en 60s y cortaban el chat en medio.
+        idleTimeout: 3600s
+        # Evita que Envoy aplique max_stream_duration H2 al WS upgrade.
+        h2UpgradePolicy: DO_NOT_UPGRADE
+---
+apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
   name: ticketing-anonymization-virtual-service

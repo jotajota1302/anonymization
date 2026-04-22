@@ -120,6 +120,16 @@ spec:
               key: "ENCRYPTION_KEY"
         - name: "CORS_ORIGINS"
           value: '["https://ticketing-anonymization.alicante.deptapps.everis.cloud"]'
+        # Evita los errores "Permission denied: /.config" y "No writable cache
+        # directories" de matplotlib/fontconfig cuando el pod corre como non-root.
+        - name: "HOME"
+          value: "/tmp"
+        - name: "MPLCONFIGDIR"
+          value: "/tmp/matplotlib"
+        - name: "FONTCONFIG_PATH"
+          value: "/tmp/fontconfig"
+        - name: "XDG_CACHE_HOME"
+          value: "/tmp/.cache"
         volumeMounts:
         - name: "ticketing-anonymization-data-volume"
           mountPath: "/app/data"

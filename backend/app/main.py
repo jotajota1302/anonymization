@@ -339,8 +339,15 @@ async def lifespan(app: FastAPI):
         app_state["agent"] = agent
         logger.info("resolution_agent_initialized", provider=settings.llm_provider)
     except Exception as e:
-        logger.warning("agent_init_failed", error=str(e),
-                       hint="Inicia sesion OKTA en /config para obtener un token Axet valido")
+        err_msg = str(e)
+        # Caso esperado al arranque: sin token Axet antes del login OKTA.
+        # El agente se revive automaticamente en /api/axet/auth/poll tras login.
+        if "Axet bearer token no disponible" in err_msg:
+            logger.info("agent_init_deferred_waiting_okta",
+                        hint="Inicia sesion OKTA en /config para activar el agente")
+        else:
+            logger.warning("agent_init_failed", error=err_msg,
+                           hint="Inicia sesion OKTA en /config para obtener un token Axet valido")
         app_state["agent"] = None
 
     # Start Axet token auto-refresh background task
