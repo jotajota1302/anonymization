@@ -1167,35 +1167,68 @@ async def close_ticket(
     if not comment_published and not any("comentario" in w for w in warnings):
         warnings.append(f"No se pudo publicar el comentario de resolucion en {source_id}")
 
-    # --- Step 7: Add worklog in source (the primary goal) ---
+    # --- Step 7: Add worklog in source, with comment fallback if it fails ---
+    # Primary path: create a formal Jira worklog. If the authenticated user
+    # has no 'Work on Issues' permission (HTTP 400/403), fall back to posting
+    # the time as a plain comment so the operator still leaves a record.
     await _progress("logging_work", f"Registrando {time_spent} en {source_id}")
-    worklog_comment = f"Resolucion ticket {dest_key}: {real_summary[:500]}"
+    worklog_comment_body = f"Resolucion ticket {dest_key}: {real_summary[:500]}"
     if time_source == "llm":
-        worklog_comment = f"[Horas estimadas por IA] {worklog_comment}"
+        worklog_comment_body = f"[Horas estimadas por IA] {worklog_comment_body}"
     worklog_registered = False
+    worklog_via_comment = False
     worklog_error: Optional[str] = None
     try:
         if hasattr(source_connector, "add_worklog_with_id"):
             worklog_registered, _ = await source_connector.add_worklog_with_id(
-                source_id, time_spent, worklog_comment
+                source_id, time_spent, worklog_comment_body
             )
         else:
             worklog_registered = await source_connector.add_worklog(
-                source_id, time_spent, worklog_comment
+                source_id, time_spent, worklog_comment_body
             )
     except Exception as e:
         logger.warning("close_worklog_failed", error=str(e))
         worklog_error = str(e)
 
     if not worklog_registered:
-        # Worklog is the primary goal. If it fails, the operator needs to know
-        # so they can either fix the token/perms or log the hours manually.
-        detail = f"No se pudo registrar el worklog ({time_spent}) en {source_id}."
-        if worklog_error:
-            detail += f" Motivo: {worklog_error}."
-        if warnings:
-            detail += " Otros avisos: " + " | ".join(warnings)
-        raise HTTPException(status_code=502, detail=detail)
+        await _progress(
+            "worklog_fallback_comment",
+            f"Worklog formal fallo — registrando horas como comentario en {source_id}",
+        )
+        fallback_text = (
+            f"[HORAS INCURRIDAS] {time_spent} — no se pudo crear worklog formal "
+            f"(motivo: {worklog_error or 'sin detalle'}).\n\n{worklog_comment_body}"
+        )
+        try:
+            if hasattr(source_connector, "add_comment_with_id"):
+                ok, _ = await source_connector.add_comment_with_id(source_id, fallback_text)
+            else:
+                ok = await source_connector.add_comment(source_id, fallback_text)
+            worklog_via_comment = bool(ok)
+        except Exception as e:
+            logger.warning("close_worklog_fallback_comment_failed", error=str(e))
+            worklog_via_comment = False
+
+        if worklog_via_comment:
+            warnings.append(
+                f"No se pudo crear worklog formal en {source_id} "
+                f"({worklog_error or 'sin detalle'}). Las horas ({time_spent}) "
+                f"quedan registradas como comentario."
+            )
+        else:
+            # Neither the formal worklog nor the fallback comment worked —
+            # the operator won't have any record of the hours. Error out so
+            # they can fix credentials/permissions before retrying.
+            detail = (
+                f"No se pudo registrar el worklog ({time_spent}) en {source_id} "
+                f"ni como worklog ni como comentario."
+            )
+            if worklog_error:
+                detail += f" Motivo worklog: {worklog_error}."
+            if warnings:
+                detail += " Otros avisos: " + " | ".join(warnings)
+            raise HTTPException(status_code=502, detail=detail)
 
     # --- Step 8: Close source (soft) ---
     await _progress("closing_source", f"Cerrando origen {source_id}")
@@ -1233,7 +1266,9 @@ async def close_ticket(
         details=(
             f"source={source_id}, dest={dest_key}, time_spent={time_spent} ({time_source}), "
             f"destination_closed={destination_closed}, source_closed={source_closed}, "
-            f"comment_published={comment_published}, warnings={len(warnings)}"
+            f"comment_published={comment_published}, "
+            f"worklog_registered={worklog_registered}, worklog_via_comment={worklog_via_comment}, "
+            f"warnings={len(warnings)}"
         ),
     )
 
@@ -1271,6 +1306,7 @@ async def close_ticket(
         "source_closed": source_closed,
         "comment_published": comment_published,
         "worklog_registered": worklog_registered,
+        "worklog_via_comment": worklog_via_comment,
         "source_transition_steps": source_steps,
         "destination_transition_steps": dest_steps,
         "warnings": warnings,
