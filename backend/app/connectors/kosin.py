@@ -494,7 +494,17 @@ class KosinConnector(TicketConnector):
             return []
 
     async def get_available_transitions(self, ticket_id: str) -> list[dict]:
-        """Get available workflow transitions for a ticket."""
+        """Get available workflow transitions for a ticket (legacy simple form)."""
+        transitions, _ = await self.get_available_transitions_detailed(ticket_id)
+        return transitions
+
+    async def get_available_transitions_detailed(
+        self, ticket_id: str
+    ) -> tuple[list[dict], Optional[str]]:
+        """Like get_available_transitions but also returns a human-readable
+        error hint (HTTP status, auth failure, etc.) so callers can explain
+        *why* there are no visible transitions.
+        """
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
@@ -505,10 +515,22 @@ class KosinConnector(TicketConnector):
                 return [
                     {"id": t["id"], "name": t.get("name", "")}
                     for t in resp.json().get("transitions", [])
-                ]
+                ], None
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code if e.response else 0
+            body = (e.response.text[:300] if e.response else "") or ""
+            hint_map = {
+                401: "401 Unauthorized (token caducado o invalido)",
+                403: "403 Forbidden (el usuario autenticado no tiene permiso para transicionar este ticket)",
+                404: "404 Not Found (el ticket no existe en este proyecto o el token apunta a otra instancia)",
+            }
+            hint = hint_map.get(status) or f"HTTP {status}: {body[:120]}"
+            logger.error("kosin_transitions_fetch_failed", ticket=ticket_id, status=status, body=body[:200])
+            return [], hint
         except httpx.HTTPError as e:
-            logger.error("kosin_transitions_fetch_failed", ticket=ticket_id, error=str(e))
-            return []
+            error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+            logger.error("kosin_transitions_fetch_failed", ticket=ticket_id, error=error_msg)
+            return [], f"Error de red: {error_msg}"
 
     async def get_ticket_status(self, ticket_id: str) -> str:
         """Get the current status name of a ticket."""

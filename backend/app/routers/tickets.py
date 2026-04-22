@@ -952,17 +952,56 @@ _CLOSE_KEYWORDS = (
 )
 
 
-async def _has_close_transition(connector, ticket_key: str) -> tuple[bool, list[str]]:
-    """Pre-check: confirm the ticket has a transition whose name looks like 'done/close/resolve'."""
+async def _has_close_transition(
+    connector, ticket_key: str
+) -> tuple[bool, list[str], Optional[str], Optional[str]]:
+    """Pre-check: confirm the ticket has a close-like transition.
+
+    Returns (can_close, available_names, current_status, error_hint).
+    current_status is fetched fresh from the target system (not DB) so the
+    caller can distinguish 'already in terminal state' from 'no permissions'.
+    error_hint is set when the transitions endpoint itself failed (HTTP error).
+    """
+    current_status: Optional[str] = None
     try:
-        transitions = await connector.get_available_transitions(ticket_key)
+        if hasattr(connector, "get_ticket_status"):
+            current_status = await connector.get_ticket_status(ticket_key)
+    except Exception as e:
+        logger.warning("close_precheck_status_failed", ticket=ticket_key, error=str(e))
+
+    error_hint: Optional[str] = None
+    try:
+        if hasattr(connector, "get_available_transitions_detailed"):
+            transitions, error_hint = await connector.get_available_transitions_detailed(ticket_key)
+        else:
+            transitions = await connector.get_available_transitions(ticket_key)
     except Exception as e:
         logger.warning("close_precheck_transitions_failed", ticket=ticket_key, error=str(e))
-        return False, []
+        return False, [], current_status, str(e)
+
     names = [t.get("name", "") for t in transitions]
     if any(any(kw in n.lower() for kw in _CLOSE_KEYWORDS) for n in names):
-        return True, names
-    return False, names
+        return True, names, current_status, error_hint
+    return False, names, current_status, error_hint
+
+
+def _format_close_block_detail(kind: str, ticket_key: str, available: list[str],
+                               current_status: Optional[str], error_hint: Optional[str]) -> str:
+    parts = [f"El ticket {kind} {ticket_key} no tiene una transicion de cierre visible."]
+    if current_status:
+        parts.append(f"Estado actual en el sistema: '{current_status}'.")
+    else:
+        parts.append("No se pudo leer el estado actual del ticket.")
+    if error_hint:
+        parts.append(f"Motivo: {error_hint}.")
+    else:
+        parts.append(f"Transiciones disponibles: {available or 'ninguna'}.")
+    parts.append(
+        "Posibles causas: (a) el token no tiene permiso de transicion sobre este proyecto, "
+        "(b) el ticket ya esta en estado terminal y solo se puede reabrir, "
+        "(c) el workflow usa un nombre de transicion no cubierto (comparte la lista de arriba para ampliarlo)."
+    )
+    return " ".join(parts)
 
 
 @router.post("/{ticket_id}/close")
@@ -1029,29 +1068,24 @@ async def close_ticket(
     await _progress("precheck", f"Verificando transiciones de {dest_key} y {source_id}")
 
     # Destination: only if it's not already in a resolved/closed-like state.
-    # If ticket.status is 'resolved' we know destination is already closed, skip.
     dest_available: list[str] = []
     if ticket["status"] != "resolved":
-        dest_can_close, dest_available = await _has_close_transition(destination, dest_key)
+        dest_can_close, dest_available, dest_status, dest_hint = await _has_close_transition(
+            destination, dest_key
+        )
         if not dest_can_close:
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    f"El ticket destino {dest_key} no tiene una transicion de cierre visible. "
-                    f"Transiciones disponibles: {dest_available or 'ninguna'}. "
-                    f"Revisa el workflow en el proyecto destino o los permisos del token."
-                ),
+                detail=_format_close_block_detail("destino", dest_key, dest_available, dest_status, dest_hint),
             )
 
-    src_can_close, src_available = await _has_close_transition(source_connector, source_id)
+    src_can_close, src_available, src_status, src_hint = await _has_close_transition(
+        source_connector, source_id
+    )
     if not src_can_close:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"El ticket origen {source_id} no tiene una transicion de cierre visible. "
-                f"Transiciones disponibles: {src_available or 'ninguna'}. "
-                f"Revisa el workflow en el proyecto origen o los permisos del token."
-            ),
+            detail=_format_close_block_detail("origen", source_id, src_available, src_status, src_hint),
         )
 
     # --- Step 2: Build resolution summary ---
