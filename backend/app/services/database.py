@@ -161,9 +161,14 @@ class DatabaseService:
         )
 
     async def get_ingested_ticket_keys(self) -> set:
-        """Get set of source_ticket_id values already ingested."""
+        """Get set of source_ticket_id values currently ingested and active.
+
+        Excludes mappings in status='closed' so reopened source tickets can
+        be re-ingested as fresh attention cycles (the old mapping stays in
+        DB as historical record, linked to its own chat_history/audit_log).
+        """
         rows = await self.fetchall(
-            "SELECT source_ticket_id FROM ticket_mapping"
+            "SELECT source_ticket_id FROM ticket_mapping WHERE status != 'closed'"
         )
         return {row["source_ticket_id"] for row in rows}
 

@@ -215,19 +215,24 @@ class KosinConnector(TicketConnector):
             return False, error_msg
 
     async def find_anon_ticket(self, source_key: str) -> Optional[str]:
-        """Check if an [ANON] ticket already exists in KOSIN for the given source key.
-        Returns the KOSIN key if found, None otherwise."""
+        """Check if an *active* [ANON] ticket already exists in KOSIN for the given source key.
+
+        Closed/Done anonymized copies are ignored so a reopened source ticket
+        can be re-ingested as a new attention cycle (the old anon copy stays
+        in the destination project as historical record).
+        """
         safe_key = _jql_escape(source_key)
         jql = (
             f'project={self.project} '
-            f'AND summary ~ "ANON" AND summary ~ "{safe_key}"'
+            f'AND summary ~ "ANON" AND summary ~ "{safe_key}" '
+            f'AND statusCategory != Done'
         )
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     f"{self._api_base}/search",
                     headers=self._headers,
-                    params={"jql": jql, "maxResults": 5, "fields": "summary"},
+                    params={"jql": jql, "maxResults": 5, "fields": "summary,status"},
                 )
                 resp.raise_for_status()
                 issues = resp.json().get("issues", [])

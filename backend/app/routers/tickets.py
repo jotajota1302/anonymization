@@ -193,14 +193,24 @@ async def ingest_confirm(kosin_key: str, client_id: Optional[str] = Query(None))
     else:
         source_connector = state["jira_connector"]
 
-    # Check if already ingested in DB
+    # Check if already ingested in DB.
+    # A mapping in status='closed' means the previous attention cycle finished;
+    # if the source was reopened we let a fresh mapping be created while keeping
+    # the historical one (and its chat/audit) intact.
     existing = await db.get_ticket_by_source_key(kosin_key)
-    if existing:
+    if existing and existing.get("status") != "closed":
         return IngestConfirmResponse(
             ticket_id=existing["id"],
             kosin_key=existing["kosin_ticket_id"],
             source_key=kosin_key,
             pii_entities_found=0,
+        )
+    if existing and existing.get("status") == "closed":
+        logger.info(
+            "reingest_after_close",
+            source_key=kosin_key,
+            previous_mapping_id=existing["id"],
+            previous_dest=existing["kosin_ticket_id"],
         )
 
     # Check if [ANON] ticket already exists in destination (DB was cleaned but destination wasn't)
