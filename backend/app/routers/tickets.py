@@ -1167,68 +1167,109 @@ async def close_ticket(
     if not comment_published and not any("comentario" in w for w in warnings):
         warnings.append(f"No se pudo publicar el comentario de resolucion en {source_id}")
 
-    # --- Step 7: Add worklog in source, with comment fallback if it fails ---
-    # Primary path: create a formal Jira worklog. If the authenticated user
-    # has no 'Work on Issues' permission (HTTP 400/403), fall back to posting
-    # the time as a plain comment so the operator still leaves a record.
-    await _progress("logging_work", f"Registrando {time_spent} en {source_id}")
+    # --- Step 7: Register time in BOTH source and destination ---
+    # The operator wants the hours imputed on both tickets. For each side:
+    #   1. Try formal Jira worklog (add_worklog).
+    #   2. If that fails (typically "no permission to associate a worklog"),
+    #      fall back to posting a plain [HORAS INCURRIDAS] comment.
+    # We only error out if *nothing* landed anywhere — otherwise the failures
+    # become visible warnings in the success response.
+    await _progress("logging_work", f"Registrando {time_spent} en {source_id} y {dest_key}")
     worklog_comment_body = f"Resolucion ticket {dest_key}: {real_summary[:500]}"
     if time_source == "llm":
         worklog_comment_body = f"[Horas estimadas por IA] {worklog_comment_body}"
-    worklog_registered = False
-    worklog_via_comment = False
-    worklog_error: Optional[str] = None
-    try:
-        if hasattr(source_connector, "add_worklog_with_id"):
-            worklog_registered, _ = await source_connector.add_worklog_with_id(
-                source_id, time_spent, worklog_comment_body
-            )
-        else:
-            worklog_registered = await source_connector.add_worklog(
-                source_id, time_spent, worklog_comment_body
-            )
-    except Exception as e:
-        logger.warning("close_worklog_failed", error=str(e))
-        worklog_error = str(e)
 
-    if not worklog_registered:
-        await _progress(
-            "worklog_fallback_comment",
-            f"Worklog formal fallo — registrando horas como comentario en {source_id}",
-        )
+    async def _record_time(connector, ticket_key: str, label: str) -> dict:
+        """Try worklog on `ticket_key`; on failure, fall back to a comment.
+
+        Returns a dict with keys: worklog_ok, worklog_id, comment_ok,
+        comment_id, error. Never raises.
+        """
+        r: dict = {
+            "worklog_ok": False, "worklog_id": None,
+            "comment_ok": False, "comment_id": None, "error": None,
+        }
+        # Worklog attempt
+        try:
+            if hasattr(connector, "add_worklog_with_id"):
+                ok, wid = await connector.add_worklog_with_id(
+                    ticket_key, time_spent, worklog_comment_body
+                )
+            else:
+                ok = await connector.add_worklog(ticket_key, time_spent, worklog_comment_body)
+                wid = None
+            r["worklog_ok"] = bool(ok)
+            r["worklog_id"] = wid
+        except Exception as e:
+            r["error"] = str(e)
+            logger.warning("close_worklog_failed", ticket=ticket_key, label=label, error=str(e))
+
+        if r["worklog_ok"]:
+            logger.info("close_worklog_ok", ticket=ticket_key, label=label,
+                        worklog_id=r["worklog_id"], time_spent=time_spent)
+            return r
+
+        # Comment fallback
         fallback_text = (
             f"[HORAS INCURRIDAS] {time_spent} — no se pudo crear worklog formal "
-            f"(motivo: {worklog_error or 'sin detalle'}).\n\n{worklog_comment_body}"
+            f"(motivo: {r['error'] or 'sin detalle'}).\n\n{worklog_comment_body}"
         )
         try:
-            if hasattr(source_connector, "add_comment_with_id"):
-                ok, _ = await source_connector.add_comment_with_id(source_id, fallback_text)
+            if hasattr(connector, "add_comment_with_id"):
+                cok, cid = await connector.add_comment_with_id(ticket_key, fallback_text)
             else:
-                ok = await source_connector.add_comment(source_id, fallback_text)
-            worklog_via_comment = bool(ok)
+                cok = await connector.add_comment(ticket_key, fallback_text)
+                cid = None
+            r["comment_ok"] = bool(cok)
+            r["comment_id"] = cid
+            if cok:
+                logger.info("close_worklog_comment_fallback_ok",
+                            ticket=ticket_key, label=label, comment_id=cid)
+            else:
+                logger.warning("close_worklog_comment_fallback_rejected",
+                               ticket=ticket_key, label=label)
         except Exception as e:
-            logger.warning("close_worklog_fallback_comment_failed", error=str(e))
-            worklog_via_comment = False
+            logger.warning("close_worklog_comment_fallback_failed",
+                           ticket=ticket_key, label=label, error=str(e))
+        return r
 
-        if worklog_via_comment:
-            warnings.append(
-                f"No se pudo crear worklog formal en {source_id} "
-                f"({worklog_error or 'sin detalle'}). Las horas ({time_spent}) "
-                f"quedan registradas como comentario."
+    src_result = await _record_time(source_connector, source_id, "source")
+    dest_result = await _record_time(destination, dest_key, "destination")
+
+    # Summarize per side
+    def _side_warning(r: dict, label: str, key: str) -> Optional[str]:
+        if r["worklog_ok"]:
+            return None
+        if r["comment_ok"]:
+            return (
+                f"No se pudo crear worklog formal en {label} {key} "
+                f"({r['error'] or 'sin detalle'}). Las horas ({time_spent}) "
+                f"quedan registradas como comentario (id {r['comment_id'] or '?'})."
             )
-        else:
-            # Neither the formal worklog nor the fallback comment worked —
-            # the operator won't have any record of the hours. Error out so
-            # they can fix credentials/permissions before retrying.
-            detail = (
-                f"No se pudo registrar el worklog ({time_spent}) en {source_id} "
-                f"ni como worklog ni como comentario."
-            )
-            if worklog_error:
-                detail += f" Motivo worklog: {worklog_error}."
-            if warnings:
-                detail += " Otros avisos: " + " | ".join(warnings)
-            raise HTTPException(status_code=502, detail=detail)
+        return (
+            f"No se pudo registrar las horas en {label} {key}: "
+            f"ni como worklog ni como comentario ({r['error'] or 'fallo sin detalle'})."
+        )
+
+    w = _side_warning(src_result, "origen", source_id)
+    if w:
+        warnings.append(w)
+    w = _side_warning(dest_result, "destino", dest_key)
+    if w:
+        warnings.append(w)
+
+    worklog_registered = src_result["worklog_ok"] or dest_result["worklog_ok"]
+    worklog_via_comment = src_result["comment_ok"] or dest_result["comment_ok"]
+    recorded_anywhere = worklog_registered or worklog_via_comment
+
+    if not recorded_anywhere:
+        detail = (
+            f"No se pudo registrar el worklog ({time_spent}) ni en {source_id} "
+            f"ni en {dest_key}, ni como worklog ni como comentario. "
+            f"Motivo origen: {src_result['error'] or 'sin detalle'}. "
+            f"Motivo destino: {dest_result['error'] or 'sin detalle'}."
+        )
+        raise HTTPException(status_code=502, detail=detail)
 
     # --- Step 8: Close source (soft) ---
     await _progress("closing_source", f"Cerrando origen {source_id}")
