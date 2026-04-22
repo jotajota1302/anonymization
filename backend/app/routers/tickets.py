@@ -1064,29 +1064,14 @@ async def close_ticket(
             "data": {"step": step, "detail": detail, "ticket_id": ticket_id},
         })
 
-    # --- Step 1: Pre-check both destination and source can be closed ---
-    await _progress("precheck", f"Verificando transiciones de {dest_key} y {source_id}")
-
-    # Destination: only if it's not already in a resolved/closed-like state.
-    dest_available: list[str] = []
-    if ticket["status"] != "resolved":
-        dest_can_close, dest_available, dest_status, dest_hint = await _has_close_transition(
-            destination, dest_key
-        )
-        if not dest_can_close:
-            raise HTTPException(
-                status_code=409,
-                detail=_format_close_block_detail("destino", dest_key, dest_available, dest_status, dest_hint),
-            )
-
-    src_can_close, src_available, src_status, src_hint = await _has_close_transition(
-        source_connector, source_id
-    )
-    if not src_can_close:
-        raise HTTPException(
-            status_code=409,
-            detail=_format_close_block_detail("origen", source_id, src_available, src_status, src_hint),
-        )
+    # --- Best-effort close (no hard pre-check) ---
+    # Each action below is soft: it tries, logs a warning on failure, and
+    # accumulates a message in `warnings`. The endpoint only returns an
+    # error to the operator if the worklog itself couldn't be registered
+    # (the primary goal). Any other failure (destination/source transition,
+    # comment) becomes a visible warning in the success response so the
+    # operator can finish it manually without being blocked.
+    warnings: list[str] = []
 
     # --- Step 2: Build resolution summary ---
     chat_history = await db.get_chat_history(ticket_id)
@@ -1144,129 +1129,99 @@ async def close_ticket(
     real_summary = Anonymizer.de_anonymize(summary_anon, sub_map)
     comment_text = f"[RESOLUCION] {real_summary}"
 
-    # --- State tracking for rollback ---
-    destination_was_closed_here = False
-    source_comment_id: Optional[str] = None
-    source_worklog_id: Optional[str] = None
-
-    async def _rollback(reason: str):
-        logger.warning("close_rollback_start", ticket_id=ticket_id, reason=reason)
-        if source_worklog_id:
-            try:
-                await source_connector.delete_worklog(source_id, source_worklog_id)
-            except Exception as e:
-                logger.error("rollback_worklog_failed", error=str(e))
-        if source_comment_id and hasattr(source_connector, "delete_comment"):
-            try:
-                await source_connector.delete_comment(source_id, source_comment_id)
-            except Exception as e:
-                logger.error("rollback_comment_failed", error=str(e))
-        if destination_was_closed_here:
-            try:
-                await destination.walk_transitions_to(dest_key, "open")
-            except Exception as e:
-                logger.warning("rollback_reopen_destination_failed", error=str(e))
-        await db.add_audit_log(
-            operator_id="operator",
-            action="close_rollback",
-            ticket_mapping_id=ticket_id,
-            details=f"reason={reason}",
-        )
-
-    try:
-        # --- Step 5: Close destination (if not already) ---
-        if ticket["status"] != "resolved":
-            await _progress("closing_destination", f"Cerrando destino {dest_key}")
-            ok = False
-            dest_steps: list[str] = []
-            try:
-                ok, dest_steps = await destination.walk_transitions_to(dest_key, "done")
-            except Exception as e:
-                logger.warning("close_walk_destination_failed", error=str(e))
-            if not ok:
-                try:
-                    ok = await destination.update_status(dest_key, "done")
-                    if ok:
-                        dest_steps.append("fallback:update_status")
-                except Exception as e:
-                    logger.warning("close_update_destination_failed", error=str(e))
-            if not ok:
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        f"No se pudo cerrar el ticket destino {dest_key}. "
-                        f"Transiciones aplicadas: {dest_steps or 'ninguna'}. "
-                        f"Transiciones disponibles ahora: {dest_available}. "
-                        f"Revisa el workflow KOSIN."
-                    ),
-                )
-            destination_was_closed_here = True
-
-        # --- Step 6: Publish comment in source ---
-        await _progress("publishing_comment", f"Publicando resolucion en {source_id}")
-        if hasattr(source_connector, "add_comment_with_id"):
-            c_ok, c_id = await source_connector.add_comment_with_id(source_id, comment_text)
-        else:
-            c_ok = await source_connector.add_comment(source_id, comment_text)
-            c_id = None
-        if not c_ok:
-            raise HTTPException(status_code=502, detail="Error publicando comentario de resolucion en origen")
-        source_comment_id = c_id
-
-        # --- Step 7: Add worklog in source ---
-        await _progress("logging_work", f"Registrando {time_spent} en {source_id}")
-        worklog_comment = f"Resolucion ticket {dest_key}: {real_summary[:500]}"
-        if time_source == "llm":
-            worklog_comment = f"[Horas estimadas por IA] {worklog_comment}"
+    # --- Step 5: Close destination (soft) ---
+    destination_closed = ticket["status"] == "resolved"  # already closed earlier
+    dest_steps: list[str] = []
+    if not destination_closed:
+        await _progress("closing_destination", f"Cerrando destino {dest_key}")
         try:
-            if hasattr(source_connector, "add_worklog_with_id"):
-                w_ok, w_id = await source_connector.add_worklog_with_id(
-                    source_id, time_spent, worklog_comment
-                )
-            else:
-                w_ok = await source_connector.add_worklog(source_id, time_spent, worklog_comment)
-                w_id = None
+            destination_closed, dest_steps = await destination.walk_transitions_to(dest_key, "done")
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Error registrando worklog en {source_id}: {e}")
-        if not w_ok:
-            raise HTTPException(status_code=502, detail=f"No se pudo registrar worklog en {source_id}")
-        source_worklog_id = w_id
-
-        # --- Step 8: Close source ---
-        await _progress("closing_source", f"Cerrando origen {source_id}")
-        source_closed = False
-        source_steps: list[str] = []
-        try:
-            source_closed, source_steps = await source_connector.walk_transitions_to(source_id, "done")
-        except Exception as e:
-            logger.warning("close_walk_source_failed", error=str(e))
-
-        if not source_closed:
+            logger.warning("close_walk_destination_failed", error=str(e))
+            warnings.append(f"Cerrar destino {dest_key} fallo (walk): {e}")
+        if not destination_closed:
             try:
-                source_closed = await source_connector.update_status(source_id, "done")
-                if source_closed:
-                    source_steps.append("fallback:update_status")
+                destination_closed = await destination.update_status(dest_key, "done")
+                if destination_closed:
+                    dest_steps.append("fallback:update_status")
             except Exception as e:
-                logger.warning("close_update_source_failed", error=str(e))
-
-        if not source_closed:
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"No se pudo cerrar el ticket origen {source_id} despues del worklog. "
-                    f"Se ha hecho rollback de comentario + worklog + destino. "
-                    f"Pasos intentados: {source_steps or 'ninguno'}."
-                ),
+                logger.warning("close_update_destination_failed", error=str(e))
+                warnings.append(f"Cerrar destino {dest_key} fallo (fallback): {e}")
+        if not destination_closed:
+            warnings.append(
+                f"No se pudo cerrar el destino {dest_key} automaticamente "
+                f"(cierralo a mano en KOSIN). Pasos aplicados: {dest_steps or 'ninguno'}."
             )
 
-    except HTTPException:
-        await _rollback("close_step_failed")
-        raise
+    # --- Step 6: Publish comment in source (soft) ---
+    await _progress("publishing_comment", f"Publicando resolucion en {source_id}")
+    comment_published = False
+    try:
+        if hasattr(source_connector, "add_comment_with_id"):
+            comment_published, _ = await source_connector.add_comment_with_id(source_id, comment_text)
+        else:
+            comment_published = await source_connector.add_comment(source_id, comment_text)
     except Exception as e:
-        await _rollback(f"unexpected:{e}")
-        raise HTTPException(status_code=500, detail=f"Error inesperado al cerrar: {e}")
+        logger.warning("close_publish_comment_failed", error=str(e))
+        warnings.append(f"Publicar comentario en {source_id} fallo: {e}")
+    if not comment_published and not any("comentario" in w for w in warnings):
+        warnings.append(f"No se pudo publicar el comentario de resolucion en {source_id}")
+
+    # --- Step 7: Add worklog in source (the primary goal) ---
+    await _progress("logging_work", f"Registrando {time_spent} en {source_id}")
+    worklog_comment = f"Resolucion ticket {dest_key}: {real_summary[:500]}"
+    if time_source == "llm":
+        worklog_comment = f"[Horas estimadas por IA] {worklog_comment}"
+    worklog_registered = False
+    worklog_error: Optional[str] = None
+    try:
+        if hasattr(source_connector, "add_worklog_with_id"):
+            worklog_registered, _ = await source_connector.add_worklog_with_id(
+                source_id, time_spent, worklog_comment
+            )
+        else:
+            worklog_registered = await source_connector.add_worklog(
+                source_id, time_spent, worklog_comment
+            )
+    except Exception as e:
+        logger.warning("close_worklog_failed", error=str(e))
+        worklog_error = str(e)
+
+    if not worklog_registered:
+        # Worklog is the primary goal. If it fails, the operator needs to know
+        # so they can either fix the token/perms or log the hours manually.
+        detail = f"No se pudo registrar el worklog ({time_spent}) en {source_id}."
+        if worklog_error:
+            detail += f" Motivo: {worklog_error}."
+        if warnings:
+            detail += " Otros avisos: " + " | ".join(warnings)
+        raise HTTPException(status_code=502, detail=detail)
+
+    # --- Step 8: Close source (soft) ---
+    await _progress("closing_source", f"Cerrando origen {source_id}")
+    source_closed = False
+    source_steps: list[str] = []
+    try:
+        source_closed, source_steps = await source_connector.walk_transitions_to(source_id, "done")
+    except Exception as e:
+        logger.warning("close_walk_source_failed", error=str(e))
+        warnings.append(f"Cerrar origen {source_id} fallo (walk): {e}")
+    if not source_closed:
+        try:
+            source_closed = await source_connector.update_status(source_id, "done")
+            if source_closed:
+                source_steps.append("fallback:update_status")
+        except Exception as e:
+            logger.warning("close_update_source_failed", error=str(e))
+            warnings.append(f"Cerrar origen {source_id} fallo (fallback): {e}")
+    if not source_closed and not any("Cerrar origen" in w for w in warnings):
+        warnings.append(
+            f"No se pudo cerrar el origen {source_id} automaticamente "
+            f"(cierralo a mano). Pasos aplicados: {source_steps or 'ninguno'}."
+        )
 
     # --- Step 9: Commit in DB ---
+    # Worklog succeeded → from the operator's point of view the ticket is done.
     await db.update_ticket_status(ticket_id, "closed")
     if agent:
         agent.invalidate_map_cache(ticket_id)
@@ -1277,7 +1232,8 @@ async def close_ticket(
         ticket_mapping_id=ticket_id,
         details=(
             f"source={source_id}, dest={dest_key}, time_spent={time_spent} ({time_source}), "
-            f"source_steps={source_steps}"
+            f"destination_closed={destination_closed}, source_closed={source_closed}, "
+            f"comment_published={comment_published}, warnings={len(warnings)}"
         ),
     )
 
@@ -1289,15 +1245,33 @@ async def close_ticket(
         dest=dest_key,
         time_spent=time_spent,
         time_source=time_source,
+        destination_closed=destination_closed,
+        source_closed=source_closed,
+        comment_published=comment_published,
+        warnings_count=len(warnings),
     )
+
+    base_msg = f"Worklog de {time_spent} registrado en {source_id}"
+    if destination_closed and source_closed and comment_published and not warnings:
+        message = f"Ticket cerrado correctamente — {base_msg}"
+    elif warnings:
+        message = f"{base_msg} con {len(warnings)} aviso{'s' if len(warnings) != 1 else ''}"
+    else:
+        message = base_msg
 
     return {
         "success": True,
-        "message": f"Ticket cerrado correctamente — {time_spent} registradas en {source_id}",
+        "message": message,
         "source_key": source_id,
         "dest_key": dest_key,
         "time_spent": time_spent,
         "time_source": time_source,
         "time_rationale": time_rationale,
+        "destination_closed": destination_closed,
+        "source_closed": source_closed,
+        "comment_published": comment_published,
+        "worklog_registered": worklog_registered,
         "source_transition_steps": source_steps,
+        "destination_transition_steps": dest_steps,
+        "warnings": warnings,
     }

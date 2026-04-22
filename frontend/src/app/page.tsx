@@ -346,7 +346,16 @@ export default function Home() {
           const suffix = data.time_source === "llm"
             ? ` (estimado por IA${data.time_rationale ? `: ${data.time_rationale}` : ""})`
             : "";
-          showToast(`${data.message}${suffix}`, "success");
+          const hasWarnings = Array.isArray(data.warnings) && data.warnings.length > 0;
+          showToast(`${data.message}${suffix}`, hasWarnings ? "warning" : "success");
+          if (hasWarnings) {
+            // Surface each warning as its own toast so the operator sees them all
+            setTimeout(() => {
+              (data.warnings as string[]).forEach((w, i) => {
+                setTimeout(() => showToast(w, "warning"), i * 400);
+              });
+            }, 500);
+          }
           setCloseModalOpen(false);
           await fetchTickets();
         } else {

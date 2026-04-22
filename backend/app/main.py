@@ -92,7 +92,9 @@ def _create_connector_from_config(config: dict) -> "TicketConnector":
     """Create a real connector instance from a system_config DB row."""
     connector_type = config.get("connector_type", "jira")
     base_url = config.get("base_url", "")
-    token = config.get("auth_token", "")
+    token = config.get("auth_token", "") or ""
+    # Strip invisible whitespace/newlines that break HTTP headers later.
+    token = token.strip()
     project = config.get("project_key", "")
     extra = config.get("extra_config", "{}")
     if isinstance(extra, str):
@@ -100,6 +102,18 @@ def _create_connector_from_config(config: dict) -> "TicketConnector":
             extra = json.loads(extra)
         except (json.JSONDecodeError, TypeError):
             extra = {}
+
+    if not token:
+        logger.error(
+            "connector_missing_token",
+            system=config.get("system_name"),
+            project=project,
+            hint=(
+                "auth_token vacio en DB — las llamadas con este connector fallaran con "
+                "'Illegal header value b\"Bearer \"'. Ve a Configuracion > Integraciones y "
+                "reintroduce el token."
+            ),
+        )
 
     if connector_type == "jira":
         return KosinConnector(
