@@ -943,16 +943,24 @@ async def get_redacted_attachment(ticket_id: int, attachment_index: int = 0):
 # All-or-nothing with best-effort rollback on failure.
 # -------------------------------------------------------------
 
-async def _source_has_close_transition(source_connector, source_id: str) -> tuple[bool, list[str]]:
-    """Pre-check: confirm the source ticket has a transition whose name looks like 'done/close/resolve'."""
-    DONE_KW = ("done", "closed", "close", "resolved", "resuelto", "cerrado", "cerrar", "finalizar", "completado", "completar")
+_CLOSE_KEYWORDS = (
+    "done", "closed", "close", "resolved", "resolve", "resolver", "resolucion",
+    "resuelto", "cerrado", "cerrar",
+    "finalizar", "finalizado", "finalize",
+    "completar", "completado", "complete", "completed",
+    "terminar", "terminado",
+)
+
+
+async def _has_close_transition(connector, ticket_key: str) -> tuple[bool, list[str]]:
+    """Pre-check: confirm the ticket has a transition whose name looks like 'done/close/resolve'."""
     try:
-        transitions = await source_connector.get_available_transitions(source_id)
+        transitions = await connector.get_available_transitions(ticket_key)
     except Exception as e:
-        logger.warning("close_precheck_transitions_failed", error=str(e))
+        logger.warning("close_precheck_transitions_failed", ticket=ticket_key, error=str(e))
         return False, []
     names = [t.get("name", "") for t in transitions]
-    if any(any(kw in (n.lower()) for kw in DONE_KW) for n in names):
+    if any(any(kw in n.lower() for kw in _CLOSE_KEYWORDS) for n in names):
         return True, names
     return False, names
 
@@ -1017,15 +1025,31 @@ async def close_ticket(
             "data": {"step": step, "detail": detail, "ticket_id": ticket_id},
         })
 
-    # --- Step 1: Pre-check source can be closed ---
-    await _progress("precheck", f"Verificando transiciones de {source_id}")
-    can_close, available = await _source_has_close_transition(source_connector, source_id)
-    if not can_close:
+    # --- Step 1: Pre-check both destination and source can be closed ---
+    await _progress("precheck", f"Verificando transiciones de {dest_key} y {source_id}")
+
+    # Destination: only if it's not already in a resolved/closed-like state.
+    # If ticket.status is 'resolved' we know destination is already closed, skip.
+    dest_available: list[str] = []
+    if ticket["status"] != "resolved":
+        dest_can_close, dest_available = await _has_close_transition(destination, dest_key)
+        if not dest_can_close:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"El ticket destino {dest_key} no tiene una transicion de cierre visible. "
+                    f"Transiciones disponibles: {dest_available or 'ninguna'}. "
+                    f"Revisa el workflow en el proyecto destino o los permisos del token."
+                ),
+            )
+
+    src_can_close, src_available = await _has_close_transition(source_connector, source_id)
+    if not src_can_close:
         raise HTTPException(
             status_code=409,
             detail=(
                 f"El ticket origen {source_id} no tiene una transicion de cierre visible. "
-                f"Transiciones disponibles: {available or 'ninguna'}. "
+                f"Transiciones disponibles: {src_available or 'ninguna'}. "
                 f"Revisa el workflow en el proyecto origen o los permisos del token."
             ),
         )
@@ -1120,19 +1144,27 @@ async def close_ticket(
         if ticket["status"] != "resolved":
             await _progress("closing_destination", f"Cerrando destino {dest_key}")
             ok = False
+            dest_steps: list[str] = []
             try:
-                ok, _ = await destination.walk_transitions_to(dest_key, "done")
+                ok, dest_steps = await destination.walk_transitions_to(dest_key, "done")
             except Exception as e:
                 logger.warning("close_walk_destination_failed", error=str(e))
             if not ok:
                 try:
                     ok = await destination.update_status(dest_key, "done")
+                    if ok:
+                        dest_steps.append("fallback:update_status")
                 except Exception as e:
                     logger.warning("close_update_destination_failed", error=str(e))
             if not ok:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"No se pudo cerrar el ticket destino {dest_key}. Revisa el workflow KOSIN.",
+                    detail=(
+                        f"No se pudo cerrar el ticket destino {dest_key}. "
+                        f"Transiciones aplicadas: {dest_steps or 'ninguna'}. "
+                        f"Transiciones disponibles ahora: {dest_available}. "
+                        f"Revisa el workflow KOSIN."
+                    ),
                 )
             destination_was_closed_here = True
 

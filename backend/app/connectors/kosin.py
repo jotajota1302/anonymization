@@ -532,7 +532,12 @@ class KosinConnector(TicketConnector):
 
         Returns (success, steps_taken) where steps_taken lists the transition names applied.
         """
-        DONE_KEYWORDS = ["done", "closed", "close", "resolved", "cerrado", "cerrar"]
+        DONE_KEYWORDS = [
+            "done", "closed", "close", "resolved", "resolve", "resolver", "resolucion",
+            "cerrado", "cerrar", "finalizar", "finalizado", "finalize",
+            "completar", "completado", "complete", "completed",
+            "terminar", "terminado",
+        ]
         TARGET_KEYWORDS = {
             "done": DONE_KEYWORDS,
             "closed": DONE_KEYWORDS,
